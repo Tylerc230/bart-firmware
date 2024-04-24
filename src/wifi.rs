@@ -6,6 +6,7 @@ use esp_idf_svc::{
 };
 use log::info;
 
+use std::str::FromStr;
 pub fn test() {
 
 }
@@ -53,8 +54,8 @@ pub fn wifi(
         None
     };
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: heapless::String::<32>::from(ssid),
-        password: heapless::String::<64>::from(pass),
+        ssid: heapless::String::from_str(ssid).unwrap(),
+        password: heapless::String::from_str(pass).unwrap(),
         channel,
         auth_method,
         ..Default::default()
