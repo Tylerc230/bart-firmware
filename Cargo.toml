@@ -8,6 +8,9 @@ rust-version = "1.71"
 
 [profile.release]
 opt-level = "s"
+lto = true
+strip = true
+panic = "abort"
 
 [profile.dev]
 debug = true    # Symbols are nice and they don't increase the size on Flash
