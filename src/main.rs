@@ -17,7 +17,7 @@ pub struct Config {
     #[default("")]
     wifi_psk: &'static str,
 }
-fn main() {
+fn main() -> Result<()>{
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
@@ -33,12 +33,19 @@ fn main() {
         peripherals.modem,
         sysloop,
     );
-    get("http://neverssl.com/");
+    let response = get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
+    let json: serde_json::Value = serde_json::from_str(&response)?;
+    print!("{}", json);
+    Ok(())
 }
 
-fn get(url: impl AsRef<str>) -> Result<()> {
+fn get(url: impl AsRef<str>) -> Result<String> {
     // 1. Create a new EspHttpConnection with default Configuration. (Check documentation)
-    let connection = EspHttpConnection::new(&Configuration::default())?;
+    let connection = EspHttpConnection::new(&Configuration {
+        use_global_ca_store: true,
+        crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
+        ..Default::default()
+    })?;
     // 2. Get a client using the embedded_svc Client::wrap method. (Check documentation)
     let mut client = Client::wrap(connection);
 
@@ -52,6 +59,7 @@ fn get(url: impl AsRef<str>) -> Result<()> {
     // Successful http status codes are in the 200..=299 range.
     let response = request.submit()?;
     let status = response.status();
+    let mut result = String::new();
     println!("Response code: {}\n", status);
     match status {
         200..=299 => {
@@ -88,7 +96,7 @@ fn get(url: impl AsRef<str>) -> Result<()> {
                         Ok(text) => {
                             // buffer contains fully valid UTF-8 data,
                             // print it and reset the offset to 0.
-                            print!("{}", text);
+                            result.push_str(text);
                             offset = 0;
                         }
                         Err(error) => {
@@ -99,7 +107,7 @@ fn get(url: impl AsRef<str>) -> Result<()> {
                             //
                             // NB. There is actually an additional case here that should be
                             // handled in a real implementation. The Utf8Error may also contain
-                            // an error_len field indicating that there is actually an invalid UTF-8
+                            // an error_len field indicating that there is actually an invalid UpTF-8
                             // sequence in the middle of the buffer. Such an error would not be
                             // recoverable through our offset and copy mechanism. The result will be
                             // that the invalid sequence will be copied to the front of the buffer and
@@ -124,5 +132,5 @@ fn get(url: impl AsRef<str>) -> Result<()> {
         _ => bail!("Unexpected response code: {}", status),
     }
 
-    Ok(())
+    Ok(result)
 }
