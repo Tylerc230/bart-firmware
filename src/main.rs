@@ -10,6 +10,10 @@ use embedded_svc::{
     http::{client::Client, Method},
     io::Read,
 };
+
+use serde::Deserialize;
+use std::collections::HashMap;
+
 #[toml_cfg::toml_config]
 pub struct Config {
     #[default("Wokwi-GUEST")]
@@ -34,9 +38,38 @@ fn main() -> Result<()>{
         sysloop,
     );
     let response = get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
-    let json: serde_json::Value = serde_json::from_str(&response)?;
-    print!("{}", json);
+    let json: Top = serde_json::from_str(&response)?;
+    print!("{:?}", json);
     Ok(())
+}
+
+#[derive(Deserialize, Debug)]
+struct Top {
+    root: Root
+}
+
+#[derive(Deserialize, Debug)]
+struct Root {
+    station: Vec<Station>
+}
+
+
+#[derive(Deserialize, Debug)]
+struct Station {
+    name: String,
+    etd: Vec<ETD>
+}
+
+#[derive(Deserialize, Debug)]
+struct ETD {
+    destination: String,
+    estimate: Vec<Estimate>
+}
+
+#[derive(Deserialize, Debug)]
+struct Estimate {
+    minutes: String,
+    delay: String,
 }
 
 fn get(url: impl AsRef<str>) -> Result<String> {
