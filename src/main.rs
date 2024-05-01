@@ -4,8 +4,16 @@ use core::str;
 use anyhow::Result;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::prelude::Peripherals,
+    hal::{
+        prelude::Peripherals, 
+        spi::{
+            self, SPI2, SpiDriver, SpiDriverConfig
+        },
+        gpio,
+        units::FromValueType
+    },
 };
+use ws2812_spi::Ws2812;
 
 use serde::Deserialize;
 
@@ -35,6 +43,15 @@ fn main() -> Result<()>{
     let response = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
     let json: Top = serde_json::from_str(&response)?;
     print!("{:?}", json);
+    //let pins = peripherals.pins;
+    //let spi_pin = peripherals.spi2;
+    //let sclk = pins.gpio48;
+    //let sdo = pins.gpio38;
+    //let spi_config = spi::SpiConfig::new().baudrate(3.MHz().into());
+    //let mut spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Option::<gpio::Gpio21>::None, &SpiDriverConfig::new())?;
+    //let spi_bus = spi::SpiBusDriver::new(&mut spi_driver, &spi_config)?;
+    //let mut leds = Ws2812::new(spi_bus); 
+
     Ok(())
 }
 
