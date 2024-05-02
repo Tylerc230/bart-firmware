@@ -1,10 +1,10 @@
 mod wifi;
 mod http;
-use core::str;
 use anyhow::Result;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
+        sys::EspError,
         prelude::Peripherals, 
         spi::{
             self, SPI2, SpiDriver, SpiDriverConfig
@@ -34,25 +34,38 @@ fn main() -> Result<()>{
     log::info!("Hello, world!");
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take().unwrap();
-    let _wifi = wifi::wifi(
-        app_config.wifi_ssid,
-        app_config.wifi_psk,
-        peripherals.modem,
-        sysloop,
-    );
-    let response = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
-    let json: Top = serde_json::from_str(&response)?;
-    print!("{:?}", json);
-    //let pins = peripherals.pins;
-    //let spi_pin = peripherals.spi2;
-    //let sclk = pins.gpio48;
-    //let sdo = pins.gpio38;
-    //let spi_config = spi::SpiConfig::new().baudrate(3.MHz().into());
-    //let mut spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Option::<gpio::Gpio21>::None, &SpiDriverConfig::new())?;
-    //let spi_bus = spi::SpiBusDriver::new(&mut spi_driver, &spi_config)?;
-    //let mut leds = Ws2812::new(spi_bus); 
+    let modem = peripherals.modem;
+    //let _wifi = wifi::wifi(
+        //app_config.wifi_ssid,
+        //app_config.wifi_psk,
+        //modem,
+        //sysloop,
+    //);
+    //let response = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
+
+    //let json: Top = serde_json::from_str(&response)?;
+    //print!("{:?}", json);
+    let pins = peripherals.pins;
+    let spi_pin = peripherals.spi2;
+    let result = create_spi_bus(pins, spi_pin);
+    let spi_bus = match result {
+        Ok(s) => s,
+        Err(e) => {
+            log::info!("SPI error: {:?}", e);
+            return Err(e.into());
+        }
+    };
+    let mut leds = Ws2812::new(spi_bus); 
 
     Ok(())
+}
+
+fn create_spi_bus<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<spi::SpiBusDriver<'a, SpiDriver<'a>>, EspError> {
+    let sclk = pins.gpio48;
+    let sdo = pins.gpio38;
+    let spi_config = spi::SpiConfig::new().baudrate(3.MHz().into());
+    let mut spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Option::<gpio::Gpio21>::None, &SpiDriverConfig::new())?;
+    spi::SpiBusDriver::new(spi_driver, &spi_config)
 }
 
 #[derive(Deserialize, Debug)]
