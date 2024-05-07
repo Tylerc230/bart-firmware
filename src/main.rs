@@ -38,45 +38,60 @@ fn main() -> Result<()>{
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take().unwrap();
     let modem = peripherals.modem;
-    //let _wifi = wifi::wifi(
-        //app_config.wifi_ssid,
-        //app_config.wifi_psk,
-        //modem,
-        //sysloop,
-    //);
-    //let response = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
+    let _wifi = wifi::wifi(
+        app_config.wifi_ssid,
+        app_config.wifi_psk,
+        modem,
+        sysloop,
+    );
+    let response = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
+    let json: Top = match serde_json::from_str(&response) {
+        Ok(json) => json,
+        Err(error) => {
+            log::error!("{:?}", error); 
+            return Err(error.into());
+        }
+    };
+    log::info!("{:?}", json);
 
-    //let json: Top = serde_json::from_str(&response)?;
-    //print!("{:?}", json);
+
+
     let pins = peripherals.pins;
     let spi_pin = peripherals.spi2;
-    let spi_bus = create_spi_bus(pins, spi_pin)?;
-    let mut leds = Ws2812::new(spi_bus); 
+    let th = thread::spawn(move || {
+        flash_leds(pins, spi_pin);
+    });
+    Ok(())
+}
 
-    let delay = time::Duration::from_secs(3);
-    let mut data: [RGB8; 3] = [RGB8::default(); 3];
-    let empty: [RGB8; 3] = [RGB8::default(); 3];
-    loop {
-        data[0] = RGB8 {
-            r: 0,
-            g: 0,
-            b: 0x10,
-        };
-        data[1] = RGB8 {
-            r: 0,
-            g: 0x10,
-            b: 0,
-        };
-        data[2] = RGB8 {
-            r: 0x10,
-            g: 0,
-            b: 0,
-        };
-        leds.write(data.iter().cloned()).unwrap();
-        thread::sleep(delay);
-        leds.write(empty.iter().cloned()).unwrap();
-        thread::sleep(delay);
-    }
+fn flash_leds(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<(), EspError> {
+        println!("This is thread {:?}", thread::current());
+        let spi_bus = create_spi_bus(pins, spi_pin)?;
+        let mut leds = Ws2812::new(spi_bus); 
+        let delay = time::Duration::from_secs(3);
+        let mut data: [RGB8; 3] = [RGB8::default(); 3];
+        let empty: [RGB8; 3] = [RGB8::default(); 3];
+        loop {
+            data[0] = RGB8 {
+                r: 0,
+                g: 0,
+                b: 0x10,
+            };
+            data[1] = RGB8 {
+                r: 0,
+                g: 0x10,
+                b: 0,
+            };
+            data[2] = RGB8 {
+                r: 0x10,
+                g: 0,
+                b: 0,
+            };
+            leds.write(data.iter().cloned()).unwrap();
+            thread::sleep(delay);
+            leds.write(empty.iter().cloned()).unwrap();
+            thread::sleep(delay);
+        }
 }
 
 fn create_spi_bus<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<spi::SpiBusDriver<'a, SpiDriver<'a>>, EspError> {

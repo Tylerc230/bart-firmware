@@ -68,9 +68,11 @@ pub fn get(url: impl AsRef<str>) -> Result<String> {
                             // buffer contains fully valid UTF-8 data,
                             // print it and reset the offset to 0.
                             result.push_str(text);
+
                             offset = 0;
                         }
                         Err(error) => {
+                            println!("error: {}\n", error);
                             // The buffer contains incomplete UTF-8 data, we will
                             // print the valid part, copy the invalid sequence to
                             // the beginning of the buffer and set an offset for the
