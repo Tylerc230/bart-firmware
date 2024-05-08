@@ -1,5 +1,6 @@
 mod wifi;
 mod http;
+mod app_state;
 use anyhow::Result;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -15,7 +16,6 @@ use esp_idf_svc::{
 };
 use ws2812_spi::Ws2812;
 
-use serde::Deserialize;
 use std::{thread, time};
 use smart_leds::RGB8;
 use smart_leds::SmartLedsWrite;
@@ -34,7 +34,6 @@ fn main() -> Result<()>{
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
     let app_config = CONFIG;
-    log::info!("Hello, world!");
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take().unwrap();
     let modem = peripherals.modem;
@@ -45,14 +44,8 @@ fn main() -> Result<()>{
         sysloop,
     );
     let response = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
-    let json: Top = match serde_json::from_str(&response) {
-        Ok(json) => json,
-        Err(error) => {
-            log::error!("{:?}", error); 
-            return Err(error.into());
-        }
-    };
-    log::info!("{:?}", json);
+    let mut app_state = app_state::AppState::new();
+    app_state.received_http_response(response);
 
 
 
@@ -101,34 +94,5 @@ fn create_spi_bus<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<spi::SpiBu
     let spi_config = spi::SpiConfig::new().baudrate(3.MHz().into());
     let mut spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Some(sdi), &SpiDriverConfig::new())?;
     spi::SpiBusDriver::new(spi_driver, &spi_config)//Crash here
-}
-
-#[derive(Deserialize, Debug)]
-struct Top {
-    root: Root
-}
-
-#[derive(Deserialize, Debug)]
-struct Root {
-    station: Vec<Station>
-}
-
-
-#[derive(Deserialize, Debug)]
-struct Station {
-    name: String,
-    etd: Vec<ETD>
-}
-
-#[derive(Deserialize, Debug)]
-struct ETD {
-    destination: String,
-    estimate: Vec<Estimate>
-}
-
-#[derive(Deserialize, Debug)]
-struct Estimate {
-    minutes: String,
-    delay: String,
 }
 
