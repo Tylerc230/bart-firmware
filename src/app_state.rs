@@ -1,5 +1,7 @@
 use serde::Deserialize;
 use anyhow::Result;
+use smart_leds::RGB8;
+use smart_leds::colors;
 //24 for ouside ring
 //16 for inside
 pub struct AppState {
@@ -20,6 +22,21 @@ impl AppState {
                 log::error!("{:?}", error);
             }
         } 
+    }
+
+    pub fn get_current_led_buffer(&self) -> LEDBuffer {
+        //if first > 16, write to outer ring, inner ring black
+        //if first <= 16 write to inner ring, outer ring from 2nd
+        let mut buff = LEDBuffer::new();
+        let next_train =  self.minutes_until_next_trains[0].unwrap_or(0);
+        let next_train = next_train as usize;
+        if next_train > buff.inside_ring.len() {
+            LEDBuffer::fill_ring(&mut buff.outside_ring, next_train, colors::YELLOW);
+
+        } else {
+
+        }
+        buff
     }
 
     fn update_state(&mut self, json: Top) {
@@ -53,6 +70,25 @@ impl AppState {
 
     fn parse_json(&self, response: String) -> Result<Top, serde_json::Error> {
         serde_json::from_str(&response)
+    }
+
+}
+
+pub struct LEDBuffer {
+    outside_ring: [RGB8; 24],
+    inside_ring: [RGB8; 16],
+    center_ring: [RGB8; 4]
+}
+
+impl LEDBuffer {
+    fn new() -> LEDBuffer {
+        LEDBuffer{outside_ring: Default::default(), inside_ring: Default::default(), center_ring: Default::default()}
+    }
+
+    fn fill_ring<const N: usize>(ring: &mut [RGB8; N], count: usize, value: RGB8) {
+        for i in 0..count {
+            ring[i] = value
+        }
     }
 }
 

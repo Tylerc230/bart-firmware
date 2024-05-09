@@ -52,39 +52,43 @@ fn main() -> Result<()>{
     let pins = peripherals.pins;
     let spi_pin = peripherals.spi2;
     let th = thread::spawn(move || {
-        flash_leds(pins, spi_pin);
+        flash_leds(pins, spi_pin, &app_state);
     });
     Ok(())
 }
 
-fn flash_leds(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<(), EspError> {
-        println!("This is thread {:?}", thread::current());
-        let spi_bus = create_spi_bus(pins, spi_pin)?;
-        let mut leds = Ws2812::new(spi_bus); 
-        let delay = time::Duration::from_secs(3);
-        let mut data: [RGB8; 3] = [RGB8::default(); 3];
-        let empty: [RGB8; 3] = [RGB8::default(); 3];
-        loop {
-            data[0] = RGB8 {
-                r: 0,
-                g: 0,
-                b: 0x10,
-            };
-            data[1] = RGB8 {
-                r: 0,
-                g: 0x10,
-                b: 0,
-            };
-            data[2] = RGB8 {
-                r: 0x10,
-                g: 0,
-                b: 0,
-            };
-            leds.write(data.iter().cloned()).unwrap();
-            thread::sleep(delay);
-            leds.write(empty.iter().cloned()).unwrap();
-            thread::sleep(delay);
-        }
+fn flash_leds(pins: gpio::Pins, spi_pin: spi::SPI2, app_state: &app_state::AppState) -> Result<(), EspError> {
+    println!("This is thread {:?}", thread::current());
+    let spi_bus = create_spi_bus(pins, spi_pin)?;
+    let mut leds = Ws2812::new(spi_bus); 
+    let delay = time::Duration::from_secs(3);
+
+
+
+    let led_buffer = app_state.get_current_led_buffer();
+    let mut data: [RGB8; 3] = [RGB8::default(); 3];
+    let empty: [RGB8; 3] = [RGB8::default(); 3];
+    loop {
+        data[0] = RGB8 {
+            r: 0,
+            g: 0,
+            b: 0x10,
+        };
+        data[1] = RGB8 {
+            r: 0,
+            g: 0x10,
+            b: 0,
+        };
+        data[2] = RGB8 {
+            r: 0x10,
+            g: 0,
+            b: 0,
+        };
+        leds.write(data.iter().cloned()).unwrap();
+        thread::sleep(delay);
+        leds.write(empty.iter().cloned()).unwrap();
+        thread::sleep(delay);
+    }
 }
 
 fn create_spi_bus<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<spi::SpiBusDriver<'a, SpiDriver<'a>>, EspError> {
