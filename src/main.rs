@@ -84,7 +84,7 @@ fn flash_leds(pins: gpio::Pins, spi_pin: spi::SPI2, app_state: &app_state::AppSt
             g: 0,
             b: 0,
         };
-        leds.write(data.iter().cloned()).unwrap();
+        leds.write(led_buffer.rgb_buffer.iter().cloned()).unwrap();
         thread::sleep(delay);
         leds.write(empty.iter().cloned()).unwrap();
         thread::sleep(delay);

@@ -30,11 +30,14 @@ impl AppState {
         let mut buff = LEDBuffer::new();
         let next_train =  self.minutes_until_next_trains[0].unwrap_or(0);
         let next_train = next_train as usize;
-        if next_train > buff.inside_ring.len() {
-            LEDBuffer::fill_ring(&mut buff.outside_ring, next_train, colors::YELLOW);
-
+        if next_train > LEDBuffer::INSIDE_RING_SIZE {
+            LEDBuffer::fill_ring(&mut buff.outside_ring(), next_train, colors::YELLOW);
         } else {
-
+            LEDBuffer::fill_ring(&mut buff.inside_ring(), next_train, colors::YELLOW);
+            if let Some(next_next_train) = self.minutes_until_next_trains[1] {
+                let next_next_train = next_next_train as usize;
+                LEDBuffer::fill_ring(&mut buff.outside_ring(), next_next_train, colors::YELLOW);
+            }
         }
         buff
     }
@@ -47,7 +50,8 @@ impl AppState {
                 station.etd
             })
             .filter(|station| {
-                station.abbreviation == "ANTC" || station.abbreviation == "PITT"
+                station.abbreviation == "MLBR" || station.abbreviation == "SFIA"
+
             })
             .flat_map(|etd| {
                 etd.estimate
@@ -75,19 +79,33 @@ impl AppState {
 }
 
 pub struct LEDBuffer {
-    outside_ring: [RGB8; 24],
-    inside_ring: [RGB8; 16],
-    center_ring: [RGB8; 4]
+    pub rgb_buffer: [RGB8; Self::BUFFER_SIZE],
 }
 
 impl LEDBuffer {
+    const OUTSIDE_RING_SIZE: usize = 24;
+    const INSIDE_RING_SIZE: usize = 16;
+    const CENTER_RING_SIZE: usize = 4;
+    const BUFFER_SIZE: usize =  LEDBuffer::OUTSIDE_RING_SIZE + LEDBuffer::INSIDE_RING_SIZE + LEDBuffer::CENTER_RING_SIZE;
     fn new() -> LEDBuffer {
-        LEDBuffer{outside_ring: Default::default(), inside_ring: Default::default(), center_ring: Default::default()}
+        LEDBuffer{rgb_buffer: [RGB8::default(); Self::BUFFER_SIZE]}
     }
 
-    fn fill_ring<const N: usize>(ring: &mut [RGB8; N], count: usize, value: RGB8) {
-        for i in 0..count {
-            ring[i] = value
+    fn outside_ring(&mut self) -> &mut [RGB8] {
+        &mut self.rgb_buffer[..Self::OUTSIDE_RING_SIZE]
+    }
+
+    fn inside_ring(&mut self) -> &mut [RGB8] {
+        &mut self.rgb_buffer[Self::OUTSIDE_RING_SIZE..Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE]
+    }
+
+    fn center_ring(&mut self) -> &mut [RGB8] {
+        &mut self.rgb_buffer[Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE..]
+    }
+
+    fn fill_ring(ring: &mut [RGB8], count: usize, value: RGB8) {
+        for led in ring.iter_mut().take(count) {
+            *led = value;
         }
     }
 }
