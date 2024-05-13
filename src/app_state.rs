@@ -22,9 +22,12 @@ impl AppState {
         } 
     }
 
-    pub fn get_current_led_buffer(&self) -> LEDBuffer {
+    pub fn get_current_led_buffer(&self, elapse_time_microsec: u64) -> LEDBuffer {
         let mut buff = LEDBuffer::new();
-        let next_train =  self.minutes_until_next_trains[0].unwrap_or(0);
+        const MICROSEC_PER_MIN: u64 = 60000000;
+        let elapse_time_min = i32::try_from(elapse_time_microsec/MICROSEC_PER_MIN).unwrap();
+        println!("elapse time: {:?}", elapse_time_min);
+        let next_train =  self.minutes_until_next_trains[0].unwrap_or(0) - elapse_time_min;
         let next_train = next_train as usize;
         let color = colors::YELLOW;
         if next_train > LEDBuffer::INSIDE_RING_SIZE {
@@ -32,7 +35,7 @@ impl AppState {
         } else {
             LEDBuffer::fill_ring(&mut buff.inside_ring(), next_train, color);
             if let Some(next_next_train) = self.minutes_until_next_trains[1] {
-                let next_next_train = next_next_train as usize;
+                let next_next_train = (next_next_train - elapse_time_min) as usize;
                 LEDBuffer::fill_ring(&mut buff.outside_ring(), next_next_train, color);
             }
         }
