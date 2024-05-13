@@ -2,8 +2,6 @@ use serde::Deserialize;
 use anyhow::Result;
 use smart_leds::RGB8;
 use smart_leds::colors;
-//24 for ouside ring
-//16 for inside
 pub struct AppState {
     minutes_until_next_trains: [Option<i32>; 2]
 }
@@ -25,18 +23,17 @@ impl AppState {
     }
 
     pub fn get_current_led_buffer(&self) -> LEDBuffer {
-        //if first > 16, write to outer ring, inner ring black
-        //if first <= 16 write to inner ring, outer ring from 2nd
         let mut buff = LEDBuffer::new();
         let next_train =  self.minutes_until_next_trains[0].unwrap_or(0);
         let next_train = next_train as usize;
+        let color = colors::YELLOW;
         if next_train > LEDBuffer::INSIDE_RING_SIZE {
-            LEDBuffer::fill_ring(&mut buff.outside_ring(), next_train, colors::YELLOW);
+            LEDBuffer::fill_ring(&mut buff.outside_ring(), next_train, color);
         } else {
-            LEDBuffer::fill_ring(&mut buff.inside_ring(), next_train, colors::YELLOW);
+            LEDBuffer::fill_ring(&mut buff.inside_ring(), next_train, color);
             if let Some(next_next_train) = self.minutes_until_next_trains[1] {
                 let next_next_train = next_next_train as usize;
-                LEDBuffer::fill_ring(&mut buff.outside_ring(), next_next_train, colors::YELLOW);
+                LEDBuffer::fill_ring(&mut buff.outside_ring(), next_next_train, color);
             }
         }
         buff

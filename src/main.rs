@@ -84,7 +84,8 @@ fn flash_leds(pins: gpio::Pins, spi_pin: spi::SPI2, app_state: &app_state::AppSt
             g: 0,
             b: 0,
         };
-        leds.write(led_buffer.rgb_buffer.iter().cloned()).unwrap();
+        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
+        leds.write(dimmed).unwrap();
         thread::sleep(delay);
         leds.write(empty.iter().cloned()).unwrap();
         thread::sleep(delay);
