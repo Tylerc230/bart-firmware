@@ -1,6 +1,6 @@
 mod wifi;
 mod http;
-mod app_state;
+use bart_core;
 use anyhow::Result;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -50,7 +50,7 @@ fn main() -> Result<()>{
         sysloop,
     );
     let response = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y")?;
-    let mut app_state = app_state::AppState::new();
+    let mut app_state = bart_core::AppState::new();
 
     timer1.set_counter(0_u64).unwrap();
     timer1.enable(true).unwrap();
@@ -67,7 +67,7 @@ fn main() -> Result<()>{
     Ok(())
 }
 
-fn flash_leds(pins: gpio::Pins, spi_pin: spi::SPI2, timer: &TimerDriver, app_state: &app_state::AppState) -> Result<(), EspError> {
+fn flash_leds(pins: gpio::Pins, spi_pin: spi::SPI2, timer: &TimerDriver, app_state: &bart_core::AppState) -> Result<(), EspError> {
     println!("This is thread {:?}", thread::current());
     let spi_bus = create_spi_bus(pins, spi_pin)?;
     let mut leds = Ws2812::new(spi_bus); 

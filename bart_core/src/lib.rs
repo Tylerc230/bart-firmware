@@ -2,6 +2,9 @@ use serde::Deserialize;
 use anyhow::Result;
 use smart_leds::RGB8;
 use smart_leds::colors;
+#[cfg(test)]
+#[path = "app_state.test.rs"]
+mod tests;
 pub struct AppState {
     minutes_until_next_trains: [Option<i32>; 2]
 }
