@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "(lldb) Debug Rust",
+        "type": "lldb",
+        "request": "launch",
+        "cargo": {
+            "args": [
+                "test",
+                "--no-run",
+                "--lib",
+                "--package=bart_core",
+                "--target=x86_64-apple-darwin"
+            ],
+            "filter": {
+                "name": "bart_core",
+                "kind": "lib"
+            }
+        },
+        "args": [ "test_etd_is_LEAVING" ],
+        "stopOnEntry": false,
+        "sourceLanguages": ["rust"],
+      }
+    ]
+  }
+  
