@@ -29,17 +29,16 @@ impl AppState {
         let mut buff = LEDBuffer::new();
         const MICROSEC_PER_MIN: u64 = 60000000;
         let elapse_time_min = i32::try_from(elapse_time_microsec/MICROSEC_PER_MIN).unwrap();
-        println!("elapse time: {:?}", elapse_time_min);
         let next_train =  self.minutes_until_next_trains[0].unwrap_or(0) - elapse_time_min;
         let next_train = next_train as usize;
         let color = colors::YELLOW;
         if next_train > LEDBuffer::INSIDE_RING_SIZE {
-            LEDBuffer::fill_ring(&mut buff.outside_ring(), next_train, color);
+            LEDBuffer::fill_ring(buff.outside_ring(), next_train, color);
         } else {
-            LEDBuffer::fill_ring(&mut buff.inside_ring(), next_train, color);
+            LEDBuffer::fill_ring(buff.inside_ring(), next_train, color);
             if let Some(next_next_train) = self.minutes_until_next_trains[1] {
                 let next_next_train = (next_next_train - elapse_time_min) as usize;
-                LEDBuffer::fill_ring(&mut buff.outside_ring(), next_next_train, color);
+                LEDBuffer::fill_ring(buff.outside_ring(), next_next_train, color);
             }
         }
         buff
@@ -127,13 +126,11 @@ struct Root {
 
 #[derive(Deserialize, Debug)]
 struct Station {
-    name: String,
-    etd: Vec<ETD>
+    etd: Vec<Etd>
 }
 
 #[derive(Deserialize, Debug)]
-struct ETD {
-    destination: String,
+struct Etd {
     abbreviation: String,
     estimate: Vec<Estimate>
 }
@@ -141,6 +138,5 @@ struct ETD {
 #[derive(Deserialize, Debug)]
 struct Estimate {
     minutes: String,
-    delay: String,
 }
 

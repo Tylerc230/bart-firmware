@@ -30,7 +30,7 @@ fn test_shortest_etd_too_long_for_inner_ring() {
 }
 
 #[test]
-fn test_etd_is_LEAVING() {
+fn test_etd_is_leaving() {
     let mut app_state = AppState::new();
     app_state.received_http_response(fixtures::json_with_etd("LEAVING", "15").to_string());
     let led_buffer = app_state.get_current_led_buffer(0);
