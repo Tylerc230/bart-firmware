@@ -6,38 +6,44 @@ use smart_leds::colors;
 #[path = "app_state.test.rs"]
 mod tests;
 pub struct AppState {
-    minutes_until_next_trains: [Option<i32>; 2]
+    etd_mins: Vec<i32>
 }
 
 impl AppState {
     pub fn new() -> AppState {
-        AppState {minutes_until_next_trains: [None; 2]}
+        AppState {etd_mins: Vec::new()}
     }
     pub fn received_http_response(&mut self, response: String) {
         match self.parse_json(response) {
             Ok(json) => {
-                log::info!("{:?}", json);
+                log::info!("JSON: {:?}", json);
                 self.update_state(json);
             },
             Err(error) => {
-                log::error!("{:?}", error);
+                log::error!("JSON: parse error {:?}", error);
             }
         } 
     }
 
     pub fn get_current_led_buffer(&self, elapse_time_microsec: u64) -> LEDBuffer {
-        let mut buff = LEDBuffer::new();
         const MICROSEC_PER_MIN: u64 = 60000000;
         let elapse_time_min = i32::try_from(elapse_time_microsec/MICROSEC_PER_MIN).unwrap();
-        let next_train =  self.minutes_until_next_trains[0].unwrap_or(0) - elapse_time_min;
-        let next_train = next_train as usize;
+        let current_etd_min: Vec<i32> = self.etd_mins.iter()
+            .map(|etd| etd - elapse_time_min)//subtract time since fetch
+            .filter(|etd| *etd > 0i32)//Filter out trains which have already left
+            .collect();
+        let mut buff = LEDBuffer::new();
+        if current_etd_min.is_empty() {
+            return buff;
+        }
+        let next_train =  current_etd_min[0];
         let color = colors::YELLOW;
         if next_train > LEDBuffer::INSIDE_RING_SIZE {
             LEDBuffer::fill_ring(buff.outside_ring(), next_train, color);
         } else {
             LEDBuffer::fill_ring(buff.inside_ring(), next_train, color);
-            if let Some(next_next_train) = self.minutes_until_next_trains[1] {
-                let next_next_train = (next_next_train - elapse_time_min) as usize;
+            if current_etd_min.len() >= 2 {
+                let next_next_train = current_etd_min[1];
                 LEDBuffer::fill_ring(buff.outside_ring(), next_next_train, color);
             }
         }
@@ -45,7 +51,7 @@ impl AppState {
     }
 
     fn update_state(&mut self, json: Top) {
-        let mut estimates = json.root
+        self.etd_mins = json.root
             .station
             .into_iter()
             .flat_map(|station| {
@@ -58,19 +64,15 @@ impl AppState {
             .flat_map(|etd| {
                 etd.estimate
             })
-            .map(| esd| {
-                esd.minutes.parse::<i32>().ok()
+            .filter_map(| esd| {
+                esd.minutes.parse::<i32>().ok() //esd.mintues can be "Leaving" need to filter those out
             })
-            .filter(|maybe_est|{
-                maybe_est.is_some() //esd.mintues can be "Leaving" need to filter those out
-            })
-            .collect::<Vec<Option<i32>>>();
+            .collect::<Vec<i32>>();
 
-        estimates.sort_by(|a, b| {
+        self.etd_mins.sort_by(|a, b| {
             a.cmp(b)
         });
-        self.minutes_until_next_trains = estimates.into_iter().take(2).collect::<Vec<Option<i32>>>().try_into().unwrap_or_default();
-        log::info!("sort {:?}", self.minutes_until_next_trains);
+        log::info!("Esimates {:?}", self.etd_mins);
 
     }
 
@@ -81,31 +83,32 @@ impl AppState {
 }
 
 pub struct LEDBuffer {
-    pub rgb_buffer: [RGB8; Self::BUFFER_SIZE],
+    pub rgb_buffer: [RGB8; Self::BUFFER_SIZE as usize],
 }
 
 impl LEDBuffer {
-    const OUTSIDE_RING_SIZE: usize = 24;
-    const INSIDE_RING_SIZE: usize = 16;
-    const CENTER_RING_SIZE: usize = 4;
-    const BUFFER_SIZE: usize =  LEDBuffer::OUTSIDE_RING_SIZE + LEDBuffer::INSIDE_RING_SIZE + LEDBuffer::CENTER_RING_SIZE;
+    const OUTSIDE_RING_SIZE: i32 = 24;
+    const INSIDE_RING_SIZE: i32 = 16;
+    const CENTER_RING_SIZE: i32 = 4;
+    const BUFFER_SIZE: i32 =  LEDBuffer::OUTSIDE_RING_SIZE + LEDBuffer::INSIDE_RING_SIZE + LEDBuffer::CENTER_RING_SIZE;
     fn new() -> LEDBuffer {
-        LEDBuffer{rgb_buffer: [RGB8::default(); Self::BUFFER_SIZE]}
+        LEDBuffer{rgb_buffer: [RGB8::default(); Self::BUFFER_SIZE as usize]}
     }
 
     fn outside_ring(&mut self) -> &mut [RGB8] {
-        &mut self.rgb_buffer[..Self::OUTSIDE_RING_SIZE]
+        &mut self.rgb_buffer[..Self::OUTSIDE_RING_SIZE as usize]
     }
 
     fn inside_ring(&mut self) -> &mut [RGB8] {
-        &mut self.rgb_buffer[Self::OUTSIDE_RING_SIZE..Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE]
+        &mut self.rgb_buffer[Self::OUTSIDE_RING_SIZE as usize ..(Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE) as usize]
     }
 
     fn center_ring(&mut self) -> &mut [RGB8] {
-        &mut self.rgb_buffer[Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE..]
+        &mut self.rgb_buffer[(Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE) as usize..]
     }
 
-    fn fill_ring(ring: &mut [RGB8], count: usize, value: RGB8) {
+    fn fill_ring(ring: &mut [RGB8], count: i32, value: RGB8) {
+        let count = count as usize;
         for led in ring.iter_mut().take(count) {
             *led = value;
         }
