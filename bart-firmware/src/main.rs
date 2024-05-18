@@ -7,6 +7,7 @@ use esp_idf_svc::{
     wifi::EspWifi,
     hal::{
         self,
+        peripheral::Peripheral,
         sys::EspError,
         prelude::Peripherals, 
         spi::{
@@ -30,6 +31,7 @@ pub struct Config {
     #[default("")]
     wifi_psk: &'static str,
 }
+//TODO: make a shell struct that has leds, wifi, and timer in it
 fn main() -> Result<()>{
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -43,11 +45,11 @@ fn main() -> Result<()>{
     let _wifi = connect_to_wifi(modem);
 
     fetch_schedule(&mut app_state);
-    let timer = create_timer(peripherals.timer00);
+    let timer00 = create_timer(peripherals.timer00);
     let pins = peripherals.pins;
     let spi_pin = peripherals.spi2;
     let _th = thread::spawn(move || {
-        let _ = render_leds(pins, spi_pin, &timer, &app_state);
+        let _ = render_leds(pins, spi_pin, &timer00, &app_state);
     });
     Ok(())
 }
@@ -67,13 +69,7 @@ fn render_leds(pins: gpio::Pins, spi_pin: spi::SPI2, timer: &TimerDriver, app_st
 
 fn fetch_schedule(app_state: &mut AppState) {
     let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-    match result {
-        Ok(response) => {
-            log::info!("Fetch Success");
-            app_state.received_http_response(response)
-        },
-        Err(error) => log::error!("Fetch failed {:?}", error),
-    }
+    app_state.received_http_response(result);
 }
 
 fn create_spi_bus<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<spi::SpiBusDriver<'a, SpiDriver<'a>>, EspError> {
@@ -96,11 +92,11 @@ fn connect_to_wifi(modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem
     )
 }
 
-fn create_timer<'d>(timer00: hal::timer::TIMER00) -> TimerDriver<'d> {
+fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> TimerDriver<'d> {
     let config = TimerConfig::new();
-    let mut timer1 = TimerDriver::new(timer00, &config).unwrap();
-    timer1.set_counter(0_u64).unwrap();
-    timer1.enable(true).unwrap();
-    timer1
+    let mut timer_driver = TimerDriver::new(timer, &config).unwrap();
+    timer_driver.set_counter(0_u64).unwrap();
+    timer_driver.enable(true).unwrap();
+    timer_driver
 }
 
