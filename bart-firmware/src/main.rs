@@ -31,72 +31,86 @@ pub struct Config {
     #[default("")]
     wifi_psk: &'static str,
 }
-//TODO: make a shell struct that has leds, wifi, and timer in it
+
 fn main() -> Result<()>{
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
-    let peripherals = Peripherals::take().unwrap();
+    let mut shell = AppShell::new()?;
+    shell.fetch_schedule();
 
-    let mut app_state = AppState::new();
-    let modem = peripherals.modem;
-    let _wifi = connect_to_wifi(modem);
-
-    fetch_schedule(&mut app_state);
-    let timer00 = create_timer(peripherals.timer00);
-    let pins = peripherals.pins;
-    let spi_pin = peripherals.spi2;
-    let _th = thread::spawn(move || {
-        let _ = render_leds(pins, spi_pin, &timer00, &app_state);
-    });
+    shell.render_leds();
     Ok(())
 }
+type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
+type LEDs<'a> = Ws2812<SPI<'a>>;
+struct AppShell<'a> {
+    leds: LEDs<'a>,
+    wifi_connection: Box<EspWifi<'static>>,
+    app_state: AppState,
+    last_fetch_timer: TimerDriver<'a>
+}
 
-fn render_leds(pins: gpio::Pins, spi_pin: spi::SPI2, timer: &TimerDriver, app_state: &AppState) -> Result<(), EspError> {
-    let spi_bus = create_spi_bus(pins, spi_pin)?;
-    let mut leds = Ws2812::new(spi_bus); 
-    let delay = time::Duration::from_secs(3);
-    loop {
-        let request_fetch_time_microsec = timer.counter().unwrap();
-        let led_buffer = app_state.get_current_led_buffer(request_fetch_time_microsec);
-        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
-        leds.write(dimmed).unwrap();
-        thread::sleep(delay);
+impl AppShell<'_> {
+    fn new<'a>() -> Result<AppShell<'a>> {
+        let peripherals = Peripherals::take().unwrap();
+        let modem = peripherals.modem;
+        let pins = peripherals.pins;
+        let spi_pin = peripherals.spi2;
+        let wifi_connection = Self::connect_to_wifi(modem)?;
+        let leds = Self::create_leds(pins, spi_pin)?;
+        let app_state = AppState::new();
+        let last_fetch_timer = Self::create_timer(peripherals.timer00)?;
+        Ok(AppShell { leds, wifi_connection, app_state, last_fetch_timer })
+    }
+
+    fn create_leds<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<LEDs<'a>> {
+        let sclk = pins.gpio12;
+        let sdo = pins.gpio11;
+        let sdi = pins.gpio13;
+        let spi_config = spi::SpiConfig::new().baudrate(3.MHz().into());
+        let spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Some(sdi), &SpiDriverConfig::new())?;
+        let spi_bus = spi::SpiBusDriver::new(spi_driver, &spi_config)?;
+        Ok(Ws2812::new(spi_bus))
+    }
+
+    fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> Result<TimerDriver<'d>> {
+        let config = TimerConfig::new();
+        let mut timer_driver = TimerDriver::new(timer, &config)?;
+        timer_driver.set_counter(0_u64)?;
+        timer_driver.enable(true)?;
+        Ok(timer_driver)
+    }
+
+    fn connect_to_wifi(modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static) -> Result<Box<EspWifi<'static>>> {
+        let app_config = CONFIG;
+        let sysloop = EspSystemEventLoop::take().unwrap();
+        wifi::wifi(
+            app_config.wifi_ssid,
+            app_config.wifi_psk,
+            modem,
+            sysloop,
+        )
+    }
+
+    fn render_leds(&mut self) -> Result<(), EspError> {
+        let delay = time::Duration::from_secs(3);
+        loop {
+            let request_fetch_time_microsec = self.last_fetch_timer.counter()?;
+            let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
+            let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
+            self.leds.write(dimmed).unwrap();
+            thread::sleep(delay);
+        }
+    }
+
+    fn fetch_schedule(&mut self) {
+        let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
+        self.app_state.received_http_response(result);
     }
 }
 
-fn fetch_schedule(app_state: &mut AppState) {
-    let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-    app_state.received_http_response(result);
-}
 
-fn create_spi_bus<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<spi::SpiBusDriver<'a, SpiDriver<'a>>, EspError> {
-    let sclk = pins.gpio12;
-    let sdo = pins.gpio11;
-    let sdi = pins.gpio13;
-    let spi_config = spi::SpiConfig::new().baudrate(3.MHz().into());
-    let spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Some(sdi), &SpiDriverConfig::new())?;
-    spi::SpiBusDriver::new(spi_driver, &spi_config)
-}
-
-fn connect_to_wifi(modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static) -> Result<Box<EspWifi<'static>>> {
-    let app_config = CONFIG;
-    let sysloop = EspSystemEventLoop::take().unwrap();
-    wifi::wifi(
-        app_config.wifi_ssid,
-        app_config.wifi_psk,
-        modem,
-        sysloop,
-    )
-}
-
-fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> TimerDriver<'d> {
-    let config = TimerConfig::new();
-    let mut timer_driver = TimerDriver::new(timer, &config).unwrap();
-    timer_driver.set_counter(0_u64).unwrap();
-    timer_driver.enable(true).unwrap();
-    timer_driver
-}
 
