@@ -1,5 +1,7 @@
-pub fn json_with_etd(first: &str, second:&str) -> String {
-    return format!(r##"{{
+use anyhow::Result;
+
+pub fn json_with_etd(first: &str, second:&str) -> Result<String> {
+    Ok(format!(r##"{{
 "?xml": {{
 "@version": "1.0",
 "@encoding": "utf-8"
@@ -150,7 +152,7 @@ pub fn json_with_etd(first: &str, second:&str) -> String {
 ],
 "message": ""
 }}
-}}"##, first, second);
+}}"##, first, second))
 }
 
 

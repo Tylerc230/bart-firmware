@@ -3,8 +3,14 @@ use anyhow::Result;
 use smart_leds::RGB8;
 use smart_leds::colors;
 #[cfg(test)]
-#[path = "app_state.test.rs"]
+#[path = "lib.test.rs"]
 mod tests;
+
+const FETCH_CORRECTION_TIME_MIN: i32 = 10;
+const FETCH_REFRESH_TIME_MIN: i32 = 5;
+const FETCH_NEXT_TRAIN_TIME_MIN: i32 = 2;
+const FETCH_RETRY_TIME_MIN: i32 = 2;
+
 pub struct AppState {
     etd_mins: Vec<i32>
 }
@@ -13,16 +19,27 @@ impl AppState {
     pub fn new() -> AppState {
         AppState {etd_mins: Vec::new()}
     }
-    pub fn received_http_response(&mut self, response: String) {
-        match self.parse_json(response) {
-            Ok(json) => {
-                log::info!("JSON: {:?}", json);
-                self.update_state(json);
-            },
+
+    pub fn received_http_response(&mut self, response: Result<String>) -> i32 {
+        match response {
             Err(error) => {
-                log::error!("JSON: parse error {:?}", error);
+                log::error!("Server Response Err {:?}", error);
+                FETCH_RETRY_TIME_MIN
             }
-        } 
+            Ok(payload) => {
+                match self.parse_json(payload) {
+                    Ok(json) => {
+                        log::info!("JSON: {:?}", json);
+                        self.update_state(json);
+                        self.next_fetch_time()
+                    },
+                    Err(error) => {
+                        log::error!("JSON: parse error {:?}", error);
+                        FETCH_RETRY_TIME_MIN
+                    }
+                } 
+            }
+        }
     }
 
     pub fn get_current_led_buffer(&self, elapse_time_microsec: u64) -> LEDBuffer {
@@ -80,6 +97,29 @@ impl AppState {
         serde_json::from_str(&response)
     }
 
+    fn next_fetch_time(&self) -> i32 {
+        match self.etd_mins.len() {
+            0..=1 => {
+                FETCH_REFRESH_TIME_MIN
+            }
+            2 => {
+                let next_train = self.etd_mins[0];
+                let before_next_train = next_train - FETCH_NEXT_TRAIN_TIME_MIN;
+                before_next_train.clamp(0, FETCH_CORRECTION_TIME_MIN)
+            }
+            _ => {
+                FETCH_CORRECTION_TIME_MIN
+            }
+        }
+
+    }
+
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub struct LEDBuffer {

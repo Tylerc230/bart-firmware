@@ -6,7 +6,7 @@ mod fixtures;
 #[test]
 fn test_two_rings_lit() {
     let mut app_state = AppState::new();
-    app_state.received_http_response(fixtures::json_with_etd("4", "15").to_string());
+    app_state.received_http_response(fixtures::json_with_etd("4", "15"));
     let led_buffer = app_state.get_current_led_buffer(0);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
@@ -20,7 +20,7 @@ fn test_two_rings_lit() {
 #[test]
 fn test_two_rings_lit_after_2_min() {
     let mut app_state = AppState::new();
-    app_state.received_http_response(fixtures::json_with_etd("4", "15").to_string());
+    app_state.received_http_response(fixtures::json_with_etd("4", "15"));
     let two_min_micro = 1000000 * 60 * 2;
     let led_buffer = app_state.get_current_led_buffer(two_min_micro);
 
@@ -34,7 +34,7 @@ fn test_two_rings_lit_after_2_min() {
 #[test]
 fn test_two_rings_lit_first_train_left() {
     let mut app_state = AppState::new();
-    app_state.received_http_response(fixtures::json_with_etd("4", "15").to_string());
+    app_state.received_http_response(fixtures::json_with_etd("4", "15"));
     let five_min_micro = 1000000 * 60 * 5;
     let led_buffer = app_state.get_current_led_buffer(five_min_micro);
 
@@ -48,7 +48,7 @@ fn test_two_rings_lit_first_train_left() {
 #[test]
 fn test_shortest_etd_too_long_for_inner_ring() {
     let mut app_state = AppState::new();
-    app_state.received_http_response(fixtures::json_with_etd("17", "20").to_string());
+    app_state.received_http_response(fixtures::json_with_etd("17", "20"));
     let led_buffer = app_state.get_current_led_buffer(0);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
@@ -61,7 +61,7 @@ fn test_shortest_etd_too_long_for_inner_ring() {
 #[test]
 fn test_etd_is_leaving() {
     let mut app_state = AppState::new();
-    app_state.received_http_response(fixtures::json_with_etd("Leaving", "15").to_string());
+    app_state.received_http_response(fixtures::json_with_etd("Leaving", "15"));
     let led_buffer = app_state.get_current_led_buffer(0);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
