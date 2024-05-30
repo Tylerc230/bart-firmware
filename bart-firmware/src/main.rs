@@ -71,7 +71,7 @@ impl AppShell<'_> {
         let sclk = pins.gpio12;
         let sdo = pins.gpio11;
         let sdi = pins.gpio13;
-        let spi_config = spi::SpiConfig::new().baudrate(6360.kHz().into());
+        let spi_config = spi::SpiConfig::new().baudrate(6410.kHz().into());
         let spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Some(sdi), &SpiDriverConfig::new())?;
         let spi_bus = spi::SpiBusDriver::new(spi_driver, &spi_config)?;
         Ok(Ws2812::new(spi_bus))
