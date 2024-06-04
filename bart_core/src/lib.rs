@@ -20,8 +20,8 @@ impl AppState {
         AppState {etd_mins: Vec::new()}
     }
 
-    pub fn received_http_response(&mut self, response: Result<String>) -> i32 {
-        match response {
+    pub fn received_http_response(&mut self, response: Result<String>) -> u64 {
+        let minutes = match response {
             Err(error) => {
                 log::error!("Server Response Err {:?}", error);
                 FETCH_RETRY_TIME_MIN
@@ -39,7 +39,8 @@ impl AppState {
                     }
                 } 
             }
-        }
+        };
+        minutes as u64 * 60
     }
 
     pub fn get_current_led_buffer(&self, elapse_time_microsec: u64) -> LEDBuffer {
@@ -54,7 +55,7 @@ impl AppState {
             return buff;
         }
         let next_train =  current_etd_min[0];
-        let color = colors::YELLOW;
+        let color = colors::WHITE;
         if next_train > LEDBuffer::INSIDE_RING_SIZE {
             LEDBuffer::fill_ring(buff.outside_ring(), next_train, color);
         } else {

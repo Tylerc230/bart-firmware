@@ -1,7 +1,8 @@
 mod wifi;
 mod http;
 use bart_core::*;
-use anyhow::Result;
+use anyhow::{Result, Error};
+use std::sync::mpsc::Receiver;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     wifi::EspWifi,
@@ -24,6 +25,9 @@ use spi_driver::Ws2812;
 
 use std::{thread, time};
 use smart_leds::SmartLedsWrite;
+use esp_idf_svc::timer::{EspTaskTimerService, EspTimer};
+use core::time::Duration;
+use std::sync::mpsc;
 
 #[toml_cfg::toml_config]
 pub struct Config {
@@ -32,7 +36,6 @@ pub struct Config {
     #[default("")]
     wifi_psk: &'static str,
 }
-
 fn main() -> Result<()>{
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -40,9 +43,8 @@ fn main() -> Result<()>{
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
     let mut shell = AppShell::new()?;
-    shell.fetch_schedule();
-
-    shell.render_leds();
+    shell.schedule_next_fetch(0);
+    shell.run_update_loop();
     Ok(())
 }
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
@@ -51,7 +53,9 @@ struct AppShell<'a> {
     leds: LEDs<'a>,
     wifi_connection: Box<EspWifi<'static>>,
     app_state: AppState,
-    last_fetch_timer: TimerDriver<'a>
+    last_fetch_response_timer: TimerDriver<'a>,
+    schedule_next_fetch_alarm: EspTimer<'a>,
+    recv_fetch_response: Receiver<Result<String, Error>>
 }
 
 impl AppShell<'_> {
@@ -62,9 +66,41 @@ impl AppShell<'_> {
         let spi_pin = peripherals.spi2;
         let wifi_connection = Self::connect_to_wifi(modem)?;
         let leds = Self::create_leds(pins, spi_pin)?;
-        let app_state = AppState::new();
+        let mut app_state = AppState::new();
         let last_fetch_timer = Self::create_timer(peripherals.timer00)?;
-        Ok(AppShell { leds, wifi_connection, app_state, last_fetch_timer })
+        let (rx, fetch_timer) = AppShell::create_fetch_timer()?;
+        let mut shell = AppShell { leds, wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, schedule_next_fetch_alarm: fetch_timer, recv_fetch_response: rx };
+        Ok(shell)
+    }
+
+    fn run_update_loop(&mut self) -> Result<(), EspError> {
+        let delay = time::Duration::from_secs(3);
+        loop {
+            self.handle_fetch_response();
+            self.render_leds()?;
+            thread::sleep(delay);
+        }
+    }
+
+    fn render_leds(&mut self) -> Result<(), EspError>{
+        let request_fetch_time_microsec = self.last_fetch_response_timer.counter()?;
+        let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
+        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
+        self.leds.write(dimmed).unwrap();
+        Ok(())
+    }
+
+    fn handle_fetch_response(&mut self) {
+        if let Ok(result) = self.recv_fetch_response.try_recv() {
+            let next_fetch_sec = self.app_state.received_http_response(result);
+            self.schedule_next_fetch(next_fetch_sec);
+            self.last_fetch_response_timer.set_counter(0);
+        }
+    }
+
+    fn schedule_next_fetch(&mut self, fetch_after_sec: u64) {
+        log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
+        self.schedule_next_fetch_alarm.after(Duration::from_secs(fetch_after_sec));
     }
 
     fn create_leds<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<LEDs<'a>> {
@@ -96,21 +132,18 @@ impl AppShell<'_> {
         )
     }
 
-    fn render_leds(&mut self) -> Result<(), EspError> {
-        let delay = time::Duration::from_secs(3);
-        loop {
-            let request_fetch_time_microsec = self.last_fetch_timer.counter()?;
-            let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
-            let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
-            self.leds.write(dimmed).unwrap();
-            thread::sleep(delay);
+    fn create_fetch_timer<'a>() -> Result<(Receiver<Result<String, Error>>, EspTimer<'a>), EspError> {
+        let (tx, rx) = mpsc::channel();
+        let timer_service = EspTaskTimerService::new()?;
+        unsafe {
+            let timer = timer_service.timer_nonstatic(move || {
+                let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
+                tx.send(result).unwrap();
+            })?;
+            Ok((rx, timer))
         }
     }
 
-    fn fetch_schedule(&mut self) {
-        let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-        self.app_state.received_http_response(result);
-    }
 }
 
 
