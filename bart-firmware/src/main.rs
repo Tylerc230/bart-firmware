@@ -8,6 +8,7 @@ use esp_idf_svc::{
     wifi::EspWifi,
     hal::{
         self,
+        task::thread::ThreadSpawnConfiguration,
         peripheral::Peripheral,
         sys::EspError,
         prelude::Peripherals, 
@@ -15,6 +16,8 @@ use esp_idf_svc::{
             self, SPI2, SpiDriver, SpiDriverConfig
         },
         gpio,
+
+        cpu::Core,
         units::FromValueType,
         timer::config::Config as TimerConfig,
         timer::TimerDriver
@@ -42,34 +45,63 @@ fn main() -> Result<()>{
     esp_idf_svc::sys::link_patches();
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
-    let mut shell = AppShell::new()?;
+
+    let (led_tx, led_rx) = mpsc::channel::<LEDIter>();
+    let peripherals = Peripherals::take().unwrap();
+    let pins = peripherals.pins;
+    let spi_pin = peripherals.spi2;
+
+    let modem = peripherals.modem;
+    let timer00 = peripherals.timer00;
+    let mut shell = AppShell::new(led_tx, modem, timer00)?;
     shell.schedule_next_fetch(0);
+    log::info!("Main core: {:?}", esp_idf_svc::hal::cpu::core());
+    let config = ThreadSpawnConfiguration {
+        name: Some(b"MyThread\0"),
+        stack_size: 4096,
+        priority: 5,
+        inherit: false,
+        pin_to_core: Some(Core::Core1),
+    };
+
+    config.set().unwrap();
+
+    std::thread::Builder::new()
+        .name("MyThread".to_string())
+        .stack_size(4096)
+        .spawn(move || {
+            log::info!("My thread core: {:?}", esp_idf_svc::hal::cpu::core());
+            let mut leds = AppShell::<'_>::create_leds(pins, spi_pin).unwrap();
+            for led_buffer in led_rx {
+                log::info!("write buffer core: {:?}", esp_idf_svc::hal::cpu::core());
+                leds.write(led_buffer).unwrap();
+            }
+        })
+        .unwrap();
+
     shell.run_update_loop();
     Ok(())
 }
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
 type LEDs<'a> = Ws2812<SPI<'a>>;
+type LEDIter = smart_leds::Brightness<core::array::IntoIter<smart_leds::RGB8, 44>>;
 struct AppShell<'a> {
-    leds: LEDs<'a>,
     wifi_connection: Box<EspWifi<'static>>,
     app_state: AppState,
     last_fetch_response_timer: TimerDriver<'a>,
     schedule_next_fetch_alarm: EspTimer<'a>,
+    led_tx: mpsc::Sender<LEDIter>,
     recv_fetch_response: Receiver<Result<String, Error>>
 }
 
-impl AppShell<'_> {
-    fn new<'a>() -> Result<AppShell<'a>> {
-        let peripherals = Peripherals::take().unwrap();
-        let modem = peripherals.modem;
-        let pins = peripherals.pins;
-        let spi_pin = peripherals.spi2;
+impl AppShell<'_> 
+{
+    fn new<'a, T: hal::timer::Timer>(led_tx: mpsc::Sender<LEDIter>, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static, timer00: impl Peripheral<P = T> + 'a)-> Result<AppShell<'a>> {
         let wifi_connection = Self::connect_to_wifi(modem)?;
-        let leds = Self::create_leds(pins, spi_pin)?;
         let mut app_state = AppState::new();
-        let last_fetch_timer = Self::create_timer(peripherals.timer00)?;
-        let (rx, fetch_timer) = AppShell::create_fetch_timer()?;
-        let mut shell = AppShell { leds, wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, schedule_next_fetch_alarm: fetch_timer, recv_fetch_response: rx };
+        let last_fetch_timer = Self::create_timer(timer00)?;
+        let (rx, fetch_timer) = Self::create_fetch_timer()?;
+        let mut shell = AppShell { wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, schedule_next_fetch_alarm: fetch_timer, recv_fetch_response: rx, led_tx };
         Ok(shell)
     }
 
@@ -77,6 +109,7 @@ impl AppShell<'_> {
         let delay = time::Duration::from_secs(3);
         loop {
             self.handle_fetch_response();
+            log::info!("Render LEDs core: {:?}", esp_idf_svc::hal::cpu::core());
             self.render_leds()?;
             thread::sleep(delay);
         }
@@ -86,7 +119,7 @@ impl AppShell<'_> {
         let request_fetch_time_microsec = self.last_fetch_response_timer.counter()?;
         let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
         let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
-        self.leds.write(dimmed).unwrap();
+        self.led_tx.send(dimmed);
         Ok(())
     }
 
