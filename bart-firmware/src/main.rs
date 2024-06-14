@@ -56,29 +56,8 @@ fn main() -> Result<()>{
     let mut shell = AppShell::new(led_tx, modem, timer00)?;
     shell.schedule_next_fetch(0);
     log::info!("Main core: {:?}", esp_idf_svc::hal::cpu::core());
-    let config = ThreadSpawnConfiguration {
-        name: Some(b"MyThread\0"),
-        stack_size: 4096,
-        priority: 5,
-        inherit: false,
-        pin_to_core: Some(Core::Core1),
-    };
 
-    config.set().unwrap();
-
-    std::thread::Builder::new()
-        .name("MyThread".to_string())
-        .stack_size(4096)
-        .spawn(move || {
-            log::info!("My thread core: {:?}", esp_idf_svc::hal::cpu::core());
-            let mut leds = AppShell::<'_>::create_leds(pins, spi_pin).unwrap();
-            for led_buffer in led_rx {
-                log::info!("write buffer core: {:?}", esp_idf_svc::hal::cpu::core());
-                leds.write(led_buffer).unwrap();
-            }
-        })
-        .unwrap();
-
+    start_render_thread(pins, spi_pin, led_rx);
     shell.run_update_loop();
     Ok(())
 }
@@ -109,7 +88,6 @@ impl AppShell<'_>
         let delay = time::Duration::from_secs(3);
         loop {
             self.handle_fetch_response();
-            log::info!("Render LEDs core: {:?}", esp_idf_svc::hal::cpu::core());
             self.render_leds()?;
             thread::sleep(delay);
         }
@@ -136,15 +114,6 @@ impl AppShell<'_>
         self.schedule_next_fetch_alarm.after(Duration::from_secs(fetch_after_sec));
     }
 
-    fn create_leds<'a>(pins: gpio::Pins, spi_pin: spi::SPI2) -> Result<LEDs<'a>> {
-        let sclk = pins.gpio12;
-        let sdo = pins.gpio11;
-        let sdi = pins.gpio13;
-        let spi_config = spi::SpiConfig::new().baudrate(6410.kHz().into());
-        let spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Some(sdi), &SpiDriverConfig::new())?;
-        let spi_bus = spi::SpiBusDriver::new(spi_driver, &spi_config)?;
-        Ok(Ws2812::new(spi_bus))
-    }
 
     fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> Result<TimerDriver<'d>> {
         let config = TimerConfig::new();
@@ -177,6 +146,51 @@ impl AppShell<'_>
         }
     }
 
+}
+
+fn start_render_thread(pins: gpio::Pins, spi_pin: spi::SPI2, led_rx: mpsc::Receiver<LEDIter>) {
+    let config = ThreadSpawnConfiguration {
+        name: Some(b"MyThread\0"),
+        stack_size: 4096,
+        priority: 5,
+        inherit: false,
+        pin_to_core: Some(Core::Core1),
+    };
+
+    config.set().unwrap();
+
+    std::thread::Builder::new()
+        .name("MyThread".to_string())
+        .stack_size(4096)
+        .spawn(move || {
+            let mut leds = LEDOutput::<'_>::new(pins, spi_pin, led_rx).unwrap();
+            leds.render_loop();
+        })
+        .unwrap();
+}
+
+struct LEDOutput<'a> {
+    leds: LEDs<'a>,
+    led_rx: mpsc::Receiver<LEDIter>
+}
+
+impl<'a> LEDOutput<'a> {
+    fn new(pins: gpio::Pins, spi_pin: spi::SPI2, led_rx: mpsc::Receiver<LEDIter>) -> Result<LEDOutput<'a>> {
+        let sclk = pins.gpio12;
+        let sdo = pins.gpio11;
+        let sdi = pins.gpio13;
+        let spi_config = spi::SpiConfig::new().baudrate(6410.kHz().into());
+        let spi_driver = SpiDriver::new::<SPI2>(spi_pin, sclk, sdo, Some(sdi), &SpiDriverConfig::new())?;
+        let spi_bus = spi::SpiBusDriver::new(spi_driver, &spi_config)?;
+        let leds = Ws2812::new(spi_bus);
+        Ok(LEDOutput { leds, led_rx })
+    }
+
+    fn render_loop(&mut self) {
+        for led_buffer in &self.led_rx {
+            self.leds.write(led_buffer).unwrap();
+        }
+    }
 }
 
 
