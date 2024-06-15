@@ -64,6 +64,10 @@ fn main() -> Result<()>{
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
 type LEDs<'a> = Ws2812<SPI<'a>>;
 type LEDIter = smart_leds::Brightness<core::array::IntoIter<smart_leds::RGB8, 44>>;
+enum AppShellCommand {
+    FetchSchedule,
+    RenderLEDs
+}
 struct AppShell<'a> {
     wifi_connection: Box<EspWifi<'static>>,
     app_state: AppState,
@@ -78,9 +82,9 @@ impl AppShell<'_>
     fn new<'a, T: hal::timer::Timer>(led_tx: mpsc::Sender<LEDIter>, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static, timer00: impl Peripheral<P = T> + 'a)-> Result<AppShell<'a>> {
         let wifi_connection = Self::connect_to_wifi(modem)?;
         let mut app_state = AppState::new();
-        let last_fetch_timer = Self::create_timer(timer00)?;
+        let (last_fetch_timer, rx2) = Self::create_timer(timer00)?;
         let (rx, fetch_timer) = Self::create_fetch_timer()?;
-        let mut shell = AppShell { wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, schedule_next_fetch_alarm: fetch_timer, recv_fetch_response: rx, led_tx };
+        let mut shell = AppShell { wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, schedule_next_fetch_alarm: fetch_timer, recv_fetch_response: rx2, led_tx };
         Ok(shell)
     }
 
@@ -111,16 +115,27 @@ impl AppShell<'_>
 
     fn schedule_next_fetch(&mut self, fetch_after_sec: u64) {
         log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
-        self.schedule_next_fetch_alarm.after(Duration::from_secs(fetch_after_sec));
+        self.last_fetch_response_timer.set_alarm(self.last_fetch_response_timer.tick_hz() * fetch_after_sec);
+        self.last_fetch_response_timer.enable_alarm(true);
+        //self.schedule_next_fetch_alarm.after(Duration::from_secs(fetch_after_sec));
     }
 
 
-    fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> Result<TimerDriver<'d>> {
+    fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> Result<(TimerDriver<'d>, Receiver<Result<String, Error>>)> {
+
+        let (tx, rx) = mpsc::channel();
         let config = TimerConfig::new();
         let mut timer_driver = TimerDriver::new(timer, &config)?;
+        unsafe {
+            timer_driver.subscribe(move || {
+                let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
+                tx.send(result).unwrap();
+            });
+        }
         timer_driver.set_counter(0_u64)?;
+        timer_driver.enable_interrupt()?;
         timer_driver.enable(true)?;
-        Ok(timer_driver)
+        Ok((timer_driver, rx))
     }
 
     fn connect_to_wifi(modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static) -> Result<Box<EspWifi<'static>>> {
@@ -140,6 +155,7 @@ impl AppShell<'_>
         unsafe {
             let timer = timer_service.timer_nonstatic(move || {
                 let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
+                //Maybe just send an enum to main task to send a request?
                 tx.send(result).unwrap();
             })?;
             Ok((rx, timer))
