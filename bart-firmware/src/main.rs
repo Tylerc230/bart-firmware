@@ -72,9 +72,8 @@ struct AppShell<'a> {
     wifi_connection: Box<EspWifi<'static>>,
     app_state: AppState,
     last_fetch_response_timer: TimerDriver<'a>,
-    schedule_next_fetch_alarm: EspTimer<'a>,
     led_tx: mpsc::Sender<LEDIter>,
-    recv_fetch_response: Receiver<Result<String, Error>>
+    recv_fetch_response: Receiver<AppShellCommand>
 }
 
 impl AppShell<'_> 
@@ -83,8 +82,7 @@ impl AppShell<'_>
         let wifi_connection = Self::connect_to_wifi(modem)?;
         let mut app_state = AppState::new();
         let (last_fetch_timer, rx2) = Self::create_timer(timer00)?;
-        let (rx, fetch_timer) = Self::create_fetch_timer()?;
-        let mut shell = AppShell { wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, schedule_next_fetch_alarm: fetch_timer, recv_fetch_response: rx2, led_tx };
+        let mut shell = AppShell { wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, recv_fetch_response: rx2, led_tx };
         Ok(shell)
     }
 
@@ -106,10 +104,17 @@ impl AppShell<'_>
     }
 
     fn handle_fetch_response(&mut self) {
-        if let Ok(result) = self.recv_fetch_response.try_recv() {
-            let next_fetch_sec = self.app_state.received_http_response(result);
-            self.schedule_next_fetch(next_fetch_sec);
-            self.last_fetch_response_timer.set_counter(0);
+        if let Ok(command) = self.recv_fetch_response.try_recv() {
+            match command {
+                AppShellCommand::FetchSchedule => {
+                    let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
+                    let next_fetch_sec = self.app_state.received_http_response(result);
+                    self.schedule_next_fetch(next_fetch_sec);
+                }
+                AppShellCommand::RenderLEDs => {
+
+                }
+            }
         }
     }
 
@@ -117,19 +122,17 @@ impl AppShell<'_>
         log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
         self.last_fetch_response_timer.set_alarm(self.last_fetch_response_timer.tick_hz() * fetch_after_sec);
         self.last_fetch_response_timer.enable_alarm(true);
-        //self.schedule_next_fetch_alarm.after(Duration::from_secs(fetch_after_sec));
+        self.last_fetch_response_timer.set_counter(0);
     }
 
 
-    fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> Result<(TimerDriver<'d>, Receiver<Result<String, Error>>)> {
-
+    fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> Result<(TimerDriver<'d>, Receiver<AppShellCommand>)> {
         let (tx, rx) = mpsc::channel();
         let config = TimerConfig::new();
         let mut timer_driver = TimerDriver::new(timer, &config)?;
         unsafe {
             timer_driver.subscribe(move || {
-                let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-                tx.send(result).unwrap();
+                tx.send(AppShellCommand::FetchSchedule).unwrap();
             });
         }
         timer_driver.set_counter(0_u64)?;
@@ -148,20 +151,6 @@ impl AppShell<'_>
             sysloop,
         )
     }
-
-    fn create_fetch_timer<'a>() -> Result<(Receiver<Result<String, Error>>, EspTimer<'a>), EspError> {
-        let (tx, rx) = mpsc::channel();
-        let timer_service = EspTaskTimerService::new()?;
-        unsafe {
-            let timer = timer_service.timer_nonstatic(move || {
-                let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-                //Maybe just send an enum to main task to send a request?
-                tx.send(result).unwrap();
-            })?;
-            Ok((rx, timer))
-        }
-    }
-
 }
 
 fn start_render_thread(pins: gpio::Pins, spi_pin: spi::SPI2, led_rx: mpsc::Receiver<LEDIter>) {
