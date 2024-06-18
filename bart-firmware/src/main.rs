@@ -1,7 +1,7 @@
 mod wifi;
 mod http;
 use bart_core::*;
-use anyhow::{Result, Error};
+use anyhow::Result;
 use std::sync::mpsc::Receiver;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -9,8 +9,9 @@ use esp_idf_svc::{
     hal::{
         self,
         task::thread::ThreadSpawnConfiguration,
+        task::queue::Queue,
         peripheral::Peripheral,
-        sys::EspError,
+        sys::{ self, EspError },
         prelude::Peripherals, 
         spi::{
             self, SPI2, SpiDriver, SpiDriverConfig
@@ -26,10 +27,7 @@ use esp_idf_svc::{
 mod spi_driver;
 use spi_driver::Ws2812;
 
-use std::{thread, time};
 use smart_leds::SmartLedsWrite;
-use esp_idf_svc::timer::{EspTaskTimerService, EspTimer};
-use core::time::Duration;
 use std::sync::mpsc;
 
 #[toml_cfg::toml_config]
@@ -53,17 +51,21 @@ fn main() -> Result<()>{
 
     let modem = peripherals.modem;
     let timer00 = peripherals.timer00;
-    let mut shell = AppShell::new(led_tx, modem, timer00)?;
+    let timer01 = peripherals.timer01;
+    let mut shell = AppShell::new(led_tx, modem, timer00, timer01)?;
+    shell.start_render_loop();
     shell.schedule_next_fetch(0);
     log::info!("Main core: {:?}", esp_idf_svc::hal::cpu::core());
 
     start_render_thread(pins, spi_pin, led_rx);
-    shell.run_update_loop();
+    shell.command_pump();
     Ok(())
 }
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
 type LEDs<'a> = Ws2812<SPI<'a>>;
 type LEDIter = smart_leds::Brightness<core::array::IntoIter<smart_leds::RGB8, 44>>;
+
+#[derive(Clone, Copy)]
 enum AppShellCommand {
     FetchSchedule,
     RenderLEDs
@@ -71,74 +73,82 @@ enum AppShellCommand {
 struct AppShell<'a> {
     wifi_connection: Box<EspWifi<'static>>,
     app_state: AppState,
-    last_fetch_response_timer: TimerDriver<'a>,
+    fetch_schedule_timer: TimerDriver<'a>,
+    render_led_timer: TimerDriver<'a>,
     led_tx: mpsc::Sender<LEDIter>,
-    recv_fetch_response: Receiver<AppShellCommand>
+    command_queue: Queue<AppShellCommand>
 }
 
 impl AppShell<'_> 
 {
-    fn new<'a, T: hal::timer::Timer>(led_tx: mpsc::Sender<LEDIter>, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static, timer00: impl Peripheral<P = T> + 'a)-> Result<AppShell<'a>> {
+    fn new<'a, T0: hal::timer::Timer, T1: hal::timer::Timer>(led_tx: mpsc::Sender<LEDIter>, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static, timer00: impl Peripheral<P = T0> + 'a, timer01: impl Peripheral<P = T1> + 'a)-> Result<AppShell<'a>> {
         let wifi_connection = Self::connect_to_wifi(modem)?;
-        let mut app_state = AppState::new();
-        let (last_fetch_timer, rx2) = Self::create_timer(timer00)?;
-        let mut shell = AppShell { wifi_connection, app_state, last_fetch_response_timer: last_fetch_timer, recv_fetch_response: rx2, led_tx };
+        let app_state = AppState::new();
+
+        let command_queue = Queue::new(20);
+        let fetch_schedule_timer = Self::create_command_timer(timer00, AppShellCommand::FetchSchedule, &command_queue, false)?;
+        let render_led_timer = Self::create_command_timer(timer01, AppShellCommand::RenderLEDs, &command_queue, true)?;
+        let shell = AppShell { wifi_connection, app_state, fetch_schedule_timer, render_led_timer, led_tx, command_queue };
         Ok(shell)
     }
 
-    fn run_update_loop(&mut self) -> Result<(), EspError> {
-        let delay = time::Duration::from_secs(3);
+    fn command_pump(&mut self) -> Result<()> {
         loop {
-            self.handle_fetch_response();
-            self.render_leds()?;
-            thread::sleep(delay);
+            if let Some((command, _)) = self.command_queue.recv_front(1000) {
+                match command {
+                    AppShellCommand::FetchSchedule => {
+                        log::debug!("Fetching schedule");
+                        let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
+                        let next_fetch_sec = self.app_state.received_http_response(result);
+                        self.schedule_next_fetch(next_fetch_sec);
+                    }
+                    AppShellCommand::RenderLEDs => {
+                        log::debug!("Render request");
+                        self.render_leds()?;
+                    }
+                }
+            } else {
+                log::error!("No command");
+            }
         }
+        Ok(())
+    }
+
+    fn start_render_loop(&mut self) {
+        let fps = 1;
+        self.render_led_timer.set_alarm(self.render_led_timer.tick_hz() * 1/fps);
+        self.render_led_timer.enable_alarm(true);
     }
 
     fn render_leds(&mut self) -> Result<(), EspError>{
-        let request_fetch_time_microsec = self.last_fetch_response_timer.counter()?;
+        let request_fetch_time_microsec = self.fetch_schedule_timer.counter()?;
         let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
         let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
         self.led_tx.send(dimmed);
         Ok(())
     }
 
-    fn handle_fetch_response(&mut self) {
-        if let Ok(command) = self.recv_fetch_response.try_recv() {
-            match command {
-                AppShellCommand::FetchSchedule => {
-                    let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-                    let next_fetch_sec = self.app_state.received_http_response(result);
-                    self.schedule_next_fetch(next_fetch_sec);
-                }
-                AppShellCommand::RenderLEDs => {
-
-                }
-            }
-        }
-    }
-
     fn schedule_next_fetch(&mut self, fetch_after_sec: u64) {
         log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
-        self.last_fetch_response_timer.set_alarm(self.last_fetch_response_timer.tick_hz() * fetch_after_sec);
-        self.last_fetch_response_timer.enable_alarm(true);
-        self.last_fetch_response_timer.set_counter(0);
+        self.fetch_schedule_timer.set_alarm(self.fetch_schedule_timer.tick_hz() * fetch_after_sec);
+        self.fetch_schedule_timer.enable_alarm(true);
+        self.fetch_schedule_timer.set_counter(0);
     }
 
 
-    fn create_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd) -> Result<(TimerDriver<'d>, Receiver<AppShellCommand>)> {
-        let (tx, rx) = mpsc::channel();
-        let config = TimerConfig::new();
+    fn create_command_timer<'d, T: hal::timer::Timer>(timer: impl Peripheral<P = T> + 'd, command: AppShellCommand, command_queue: &Queue<AppShellCommand>, repeat: bool) -> Result<TimerDriver<'d>> {
+        let config = TimerConfig::new().auto_reload(repeat);
         let mut timer_driver = TimerDriver::new(timer, &config)?;
         unsafe {
+            let c = Queue::new_borrowed(command_queue.as_raw());
             timer_driver.subscribe(move || {
-                tx.send(AppShellCommand::FetchSchedule).unwrap();
+                c.send_back(command, 100).unwrap();
             });
         }
         timer_driver.set_counter(0_u64)?;
         timer_driver.enable_interrupt()?;
         timer_driver.enable(true)?;
-        Ok((timer_driver, rx))
+        Ok(timer_driver)
     }
 
     fn connect_to_wifi(modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static) -> Result<Box<EspWifi<'static>>> {
@@ -193,6 +203,7 @@ impl<'a> LEDOutput<'a> {
 
     fn render_loop(&mut self) {
         for led_buffer in &self.led_rx {
+            log::debug!("Rendering leds");
             self.leds.write(led_buffer).unwrap();
         }
     }
