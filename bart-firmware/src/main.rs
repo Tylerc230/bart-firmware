@@ -165,9 +165,9 @@ impl AppShell<'_>
 
 fn start_render_thread(pins: gpio::Pins, spi_pin: spi::SPI2, led_rx: mpsc::Receiver<LEDIter>) {
     let config = ThreadSpawnConfiguration {
-        name: Some(b"MyThread\0"),
+        name: Some(b"RenderThread\0"),
         stack_size: 4096,
-        priority: 5,
+        priority: 24,
         inherit: false,
         pin_to_core: Some(Core::Core1),
     };
@@ -175,9 +175,11 @@ fn start_render_thread(pins: gpio::Pins, spi_pin: spi::SPI2, led_rx: mpsc::Recei
     config.set().unwrap();
 
     std::thread::Builder::new()
-        .name("MyThread".to_string())
+        .name("RenderThread".to_string())
         .stack_size(4096)
         .spawn(move || {
+
+            log::info!("Render loop core: {:?}", esp_idf_svc::hal::cpu::core());
             let mut leds = LEDOutput::<'_>::new(pins, spi_pin, led_rx).unwrap();
             leds.render_loop();
         })
