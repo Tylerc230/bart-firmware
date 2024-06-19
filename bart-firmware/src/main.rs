@@ -2,7 +2,6 @@ mod wifi;
 mod http;
 use bart_core::*;
 use anyhow::Result;
-use std::sync::mpsc::Receiver;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     wifi::EspWifi,
@@ -11,7 +10,6 @@ use esp_idf_svc::{
         task::thread::ThreadSpawnConfiguration,
         task::queue::Queue,
         peripheral::Peripheral,
-        sys::{ self, EspError },
         prelude::Peripherals, 
         spi::{
             self, SPI2, SpiDriver, SpiDriverConfig
@@ -30,13 +28,10 @@ use spi_driver::Ws2812;
 use smart_leds::SmartLedsWrite;
 use std::sync::mpsc;
 
-#[toml_cfg::toml_config]
-pub struct Config {
-    #[default("Wokwi-GUEST")]
-    wifi_ssid: &'static str,
-    #[default("")]
-    wifi_psk: &'static str,
-}
+type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
+type LEDs<'a> = Ws2812<SPI<'a>>;
+type LEDIter = smart_leds::Brightness<core::array::IntoIter<smart_leds::RGB8, 44>>;
+
 fn main() -> Result<()>{
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -53,17 +48,14 @@ fn main() -> Result<()>{
     let timer00 = peripherals.timer00;
     let timer01 = peripherals.timer01;
     let mut shell = AppShell::new(led_tx, modem, timer00, timer01)?;
-    shell.start_render_loop();
-    shell.schedule_next_fetch(0);
+    shell.start_render_loop()?;
+    shell.schedule_next_fetch(0)?;
     log::info!("Main core: {:?}", esp_idf_svc::hal::cpu::core());
 
     start_render_thread(pins, spi_pin, led_rx);
-    shell.command_pump();
+    shell.command_pump()?;
     Ok(())
 }
-type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
-type LEDs<'a> = Ws2812<SPI<'a>>;
-type LEDIter = smart_leds::Brightness<core::array::IntoIter<smart_leds::RGB8, 44>>;
 
 #[derive(Clone, Copy)]
 enum AppShellCommand {
@@ -100,7 +92,7 @@ impl AppShell<'_>
                         log::debug!("Fetching schedule");
                         let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
                         let next_fetch_sec = self.app_state.received_http_response(result);
-                        self.schedule_next_fetch(next_fetch_sec);
+                        self.schedule_next_fetch(next_fetch_sec)?;
                     }
                     AppShellCommand::RenderLEDs => {
                         log::debug!("Render request");
@@ -114,25 +106,27 @@ impl AppShell<'_>
         Ok(())
     }
 
-    fn start_render_loop(&mut self) {
+    fn start_render_loop(&mut self) -> Result<()> {
         let fps = 1;
-        self.render_led_timer.set_alarm(self.render_led_timer.tick_hz() * 1/fps);
-        self.render_led_timer.enable_alarm(true);
-    }
-
-    fn render_leds(&mut self) -> Result<(), EspError>{
-        let request_fetch_time_microsec = self.fetch_schedule_timer.counter()?;
-        let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
-        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
-        self.led_tx.send(dimmed);
+        self.render_led_timer.set_alarm(self.render_led_timer.tick_hz() * 1/fps)?;
+        self.render_led_timer.enable_alarm(true)?;
         Ok(())
     }
 
-    fn schedule_next_fetch(&mut self, fetch_after_sec: u64) {
+    fn render_leds(&mut self) -> Result<()>{
+        let request_fetch_time_microsec = self.fetch_schedule_timer.counter()?;
+        let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
+        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
+        self.led_tx.send(dimmed)?;
+        Ok(())
+    }
+
+    fn schedule_next_fetch(&mut self, fetch_after_sec: u64) -> Result<()> {
         log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
-        self.fetch_schedule_timer.set_alarm(self.fetch_schedule_timer.tick_hz() * fetch_after_sec);
-        self.fetch_schedule_timer.enable_alarm(true);
-        self.fetch_schedule_timer.set_counter(0);
+        self.fetch_schedule_timer.set_alarm(self.fetch_schedule_timer.tick_hz() * fetch_after_sec)?;
+        self.fetch_schedule_timer.enable_alarm(true)?;
+        self.fetch_schedule_timer.set_counter(0)?;
+        Ok(())
     }
 
 
@@ -143,7 +137,7 @@ impl AppShell<'_>
             let c = Queue::new_borrowed(command_queue.as_raw());
             timer_driver.subscribe(move || {
                 c.send_back(command, 100).unwrap();
-            });
+            })?;
         }
         timer_driver.set_counter(0_u64)?;
         timer_driver.enable_interrupt()?;
@@ -211,5 +205,13 @@ impl<'a> LEDOutput<'a> {
     }
 }
 
+
+#[toml_cfg::toml_config]
+pub struct Config {
+    #[default("Wokwi-GUEST")]
+    wifi_ssid: &'static str,
+    #[default("")]
+    wifi_psk: &'static str,
+}
 
 
