@@ -38,21 +38,20 @@ fn main() -> Result<()>{
     esp_idf_svc::sys::link_patches();
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
+    log::info!("Main core: {:?}", esp_idf_svc::hal::cpu::core());
 
     let (led_tx, led_rx) = mpsc::channel::<LEDIter>();
     let peripherals = Peripherals::take().unwrap();
     let pins = peripherals.pins;
     let spi_pin = peripherals.spi2;
+    start_render_thread(pins, spi_pin, led_rx);
 
     let modem = peripherals.modem;
     let timer00 = peripherals.timer00;
     let timer01 = peripherals.timer01;
     let mut shell = AppShell::new(led_tx, modem, timer00, timer01)?;
-    shell.start_render_loop()?;
+    shell.start_render_timer()?;
     shell.schedule_next_fetch(0)?;
-    log::info!("Main core: {:?}", esp_idf_svc::hal::cpu::core());
-
-    start_render_thread(pins, spi_pin, led_rx);
     shell.command_pump()?;
     Ok(())
 }
@@ -106,7 +105,7 @@ impl AppShell<'_>
         Ok(())
     }
 
-    fn start_render_loop(&mut self) -> Result<()> {
+    fn start_render_timer(&mut self) -> Result<()> {
         let fps = 1;
         self.render_led_timer.set_alarm(self.render_led_timer.tick_hz() * 1/fps)?;
         self.render_led_timer.enable_alarm(true)?;
