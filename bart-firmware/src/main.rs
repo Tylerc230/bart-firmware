@@ -49,7 +49,9 @@ fn main() -> Result<()>{
     let modem = peripherals.modem;
     let timer00 = peripherals.timer00;
     let timer01 = peripherals.timer01;
-    let mut shell = AppShell::new(led_tx, modem, timer00, timer01)?;
+    let mut shell = AppShell::new(led_tx, timer00, timer01)?;
+
+    shell.connect_to_wifi(modem)?;
     shell.start_render_timer()?;
     shell.schedule_next_fetch(0)?;
     shell.command_pump()?;
@@ -62,7 +64,7 @@ enum AppShellCommand {
     RenderLEDs
 }
 struct AppShell<'a> {
-    wifi_connection: Box<EspWifi<'static>>,
+    wifi_connection: Option<Box<EspWifi<'static>>>,
     app_state: AppState,
     fetch_schedule_timer: TimerDriver<'a>,
     render_led_timer: TimerDriver<'a>,
@@ -72,14 +74,12 @@ struct AppShell<'a> {
 
 impl AppShell<'_> 
 {
-    fn new<'a, T0: hal::timer::Timer, T1: hal::timer::Timer>(led_tx: mpsc::Sender<LEDIter>, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static, timer00: impl Peripheral<P = T0> + 'a, timer01: impl Peripheral<P = T1> + 'a)-> Result<AppShell<'a>> {
-        let wifi_connection = Self::connect_to_wifi(modem)?;
+    fn new<'a, T0: hal::timer::Timer, T1: hal::timer::Timer>(led_tx: mpsc::Sender<LEDIter>, timer00: impl Peripheral<P = T0> + 'a, timer01: impl Peripheral<P = T1> + 'a)-> Result<AppShell<'a>> {
         let app_state = AppState::new();
-
         let command_queue = Queue::new(20);
         let fetch_schedule_timer = Self::create_command_timer(timer00, AppShellCommand::FetchSchedule, &command_queue, false)?;
         let render_led_timer = Self::create_command_timer(timer01, AppShellCommand::RenderLEDs, &command_queue, true)?;
-        let shell = AppShell { wifi_connection, app_state, fetch_schedule_timer, render_led_timer, led_tx, command_queue };
+        let shell = AppShell { wifi_connection: None, app_state, fetch_schedule_timer, render_led_timer, led_tx, command_queue };
         Ok(shell)
     }
 
@@ -144,15 +144,16 @@ impl AppShell<'_>
         Ok(timer_driver)
     }
 
-    fn connect_to_wifi(modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static) -> Result<Box<EspWifi<'static>>> {
+    fn connect_to_wifi(&mut self, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static) -> Result<()> {
         let app_config = CONFIG;
         let sysloop = EspSystemEventLoop::take().unwrap();
-        wifi::wifi(
+        self.wifi_connection =  Some(wifi::wifi(
             app_config.wifi_ssid,
             app_config.wifi_psk,
             modem,
             sysloop,
-        )
+        )?);
+        Ok(())
     }
 }
 
