@@ -12,12 +12,21 @@ const FETCH_NEXT_TRAIN_TIME_MIN: i32 = 2;
 const FETCH_RETRY_TIME_MIN: i32 = 2;
 
 pub struct AppState {
-    etd_mins: Vec<i32>
+    etd_mins: Vec<i32>,
+    network_activity: bool
 }
 
 impl AppState {
     pub fn new() -> AppState {
-        AppState {etd_mins: Vec::new()}
+        AppState {etd_mins: Vec::new(), network_activity: false}
+    }
+
+    pub fn network_activity_started(&mut self) {
+        self.network_activity = true;
+    }
+
+    pub fn network_activity_complete(&mut self) {
+        self.network_activity = false;
     }
 
     pub fn received_http_response(&mut self, response: Result<String>) -> u64 {
@@ -51,6 +60,9 @@ impl AppState {
             .filter(|etd| *etd > 0i32)//Filter out trains which have already left
             .collect();
         let mut buff = LEDBuffer::new();
+        if self.network_activity {
+            LEDBuffer::fill_ring(buff.center_ring(), 4, colors::CORNFLOWER_BLUE);
+        }
         if current_etd_min.is_empty() {
             return buff;
         }

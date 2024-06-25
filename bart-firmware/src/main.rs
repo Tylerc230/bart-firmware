@@ -102,9 +102,9 @@ impl AppShell<'_>
                 let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
                 let next_fetch_sec = self.app_state.received_http_response(result);
                 self.schedule_next_fetch(next_fetch_sec)?;
+                self.app_state.network_activity_complete();
             }
             AppShellCommand::RenderLEDs => {
-                log::debug!("Render request");
                 self.render_leds()?;
             }
             AppShellCommand::WifiConnected => {
@@ -154,6 +154,7 @@ impl AppShell<'_>
     }
 
     fn connect_to_wifi(&mut self, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static + std::marker::Send) -> Result<()> {
+        self.app_state.network_activity_started();
         let config = ThreadSpawnConfiguration {
             name: Some(b"WifiConnectThread\0"),
             stack_size: 4096,
