@@ -10,12 +10,12 @@ static LED_COLOR: RGB8 = colors::WHITE;
 #[test]
 fn test_two_rings_lit() {
     let mut app_state = AppState::new(launch_time());
-    app_state.received_http_response(fixtures::json_with_etd("4", "15"));
+    app_state.received_http_response(fixtures::json_with_etd_3_trains("4", "15"));
     let led_buffer = app_state.get_current_led_buffer(0);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
-    fill_inner_ring::<4>(&mut expected_buffer, colors::WHITE);
-    fill_outer_ring::<15>(&mut expected_buffer, colors::WHITE);
+    fill_inner_ring::<4>(&mut expected_buffer, LED_COLOR);
+    fill_outer_ring::<15>(&mut expected_buffer, LED_COLOR);
 
     assert_eq!(expected_buffer, led_buffer.rgb_buffer);
 }
@@ -24,13 +24,13 @@ fn test_two_rings_lit() {
 #[test]
 fn test_two_rings_lit_after_2_min() {
     let mut app_state = AppState::new(launch_time());
-    app_state.received_http_response(fixtures::json_with_etd("4", "15"));
+    app_state.received_http_response(fixtures::json_with_etd_3_trains("4", "15"));
     let two_min_micro = 1000000 * 60 * 2;
     let led_buffer = app_state.get_current_led_buffer(two_min_micro);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
-    fill_inner_ring::<2>(&mut expected_buffer, colors::WHITE);
-    fill_outer_ring::<13>(&mut expected_buffer, colors::WHITE);
+    fill_inner_ring::<2>(&mut expected_buffer, LED_COLOR);
+    fill_outer_ring::<13>(&mut expected_buffer, LED_COLOR);
 
     assert_eq!(expected_buffer, led_buffer.rgb_buffer);
 }
@@ -38,13 +38,13 @@ fn test_two_rings_lit_after_2_min() {
 #[test]
 fn test_two_rings_lit_first_train_left() {
     let mut app_state = AppState::new(launch_time());
-    app_state.received_http_response(fixtures::json_with_etd("4", "15"));
+    app_state.received_http_response(fixtures::json_with_etd_3_trains("4", "15"));
     let five_min_micro = 1000000 * 60 * 5;
     let led_buffer = app_state.get_current_led_buffer(five_min_micro);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
-    fill_inner_ring::<10>(&mut expected_buffer, colors::WHITE);
-    fill_outer_ring::<18>(&mut expected_buffer, colors::WHITE);
+    fill_inner_ring::<10>(&mut expected_buffer, LED_COLOR);
+    fill_outer_ring::<18>(&mut expected_buffer, LED_COLOR);
 
     assert_eq!(expected_buffer, led_buffer.rgb_buffer);
 }
@@ -52,12 +52,12 @@ fn test_two_rings_lit_first_train_left() {
 #[test]
 fn test_shortest_etd_too_long_for_inner_ring() {
     let mut app_state = AppState::new(launch_time());
-    app_state.received_http_response(fixtures::json_with_etd("17", "20"));
+    app_state.received_http_response(fixtures::json_with_etd_3_trains("17", "20"));
     let led_buffer = app_state.get_current_led_buffer(0);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
 
-    fill_outer_ring::<17>(&mut expected_buffer, colors::WHITE);
+    fill_outer_ring::<17>(&mut expected_buffer, LED_COLOR);
 
     assert_eq!(expected_buffer, led_buffer.rgb_buffer);
 }
@@ -65,14 +65,46 @@ fn test_shortest_etd_too_long_for_inner_ring() {
 #[test]
 fn test_etd_is_leaving() {
     let mut app_state = AppState::new(launch_time());
-    app_state.received_http_response(fixtures::json_with_etd("Leaving", "15"));
+    app_state.received_http_response(fixtures::json_with_etd_3_trains("Leaving", "15"));
     let led_buffer = app_state.get_current_led_buffer(0);
 
     let mut expected_buffer: [RGB8; 44] = [colors::BLACK; 44];
-    fill_inner_ring::<15>(&mut expected_buffer, colors::WHITE);
-    fill_outer_ring::<23>(&mut expected_buffer, colors::WHITE);
+    fill_inner_ring::<15>(&mut expected_buffer, LED_COLOR);
+    fill_outer_ring::<23>(&mut expected_buffer, LED_COLOR);
 
     assert_eq!(expected_buffer, led_buffer.rgb_buffer);
+}
+
+#[test]
+fn test_next_fetch_time_2_trains() {
+    //We should fetch 2 min before next train leaves (4 -2) * 60 = 120
+    let mut app_state = AppState::new(launch_time());
+    let next_fetch_sec = app_state.received_http_response(fixtures::json_with_etd_2_trains("4", "15"));
+    assert_eq!(next_fetch_sec, 120);
+}
+
+#[test]
+fn test_next_fetch_time_2_trains_beyond_max() {
+    //The most time we should wait between fetches is 10 min (600) CLAMP((13 - 2), 10) * 60 = 600
+    let mut app_state = AppState::new(launch_time());
+    let next_fetch_sec = app_state.received_http_response(fixtures::json_with_etd_2_trains("13", "15"));
+    assert_eq!(next_fetch_sec, 600);
+}
+
+#[test]
+fn test_next_fetch_time_1_train() {
+    //If there's only 1 train scheduled, fetch in 5 min
+    let mut app_state = AppState::new(launch_time());
+    let next_fetch_sec = app_state.received_http_response(fixtures::json_with_etd_1_train("4"));
+    assert_eq!(next_fetch_sec, 300);
+}
+
+#[test]
+fn test_next_fetch_time_3_train() {
+    //If there's 3 or more trains, fetch in 10 min
+    let mut app_state = AppState::new(launch_time());
+    let next_fetch_sec = app_state.received_http_response(fixtures::json_with_etd_3_trains("4", "15"));
+    assert_eq!(next_fetch_sec, 600);
 }
 
 fn fill_outer_ring<const N: usize>(buffer: &mut [RGB8; 44], color: RGB8) {
