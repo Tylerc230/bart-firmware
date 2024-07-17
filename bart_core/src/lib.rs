@@ -1,3 +1,6 @@
+use std::time;
+use std::time::SystemTime;
+
 use serde::Deserialize;
 use anyhow::Result;
 use smart_leds::RGB8;
@@ -13,12 +16,13 @@ const FETCH_RETRY_TIME_MIN: i32 = 2;
 
 pub struct AppState {
     etd_mins: Vec<i32>,
-    network_activity: bool
+    network_activity: bool,
+    last_motion_sensed: SystemTime
 }
 
 impl AppState {
-    pub fn new() -> AppState {
-        AppState {etd_mins: Vec::new(), network_activity: false}
+    pub fn new(now: std::time::SystemTime) -> AppState {
+        AppState {etd_mins: Vec::new(), network_activity: false, last_motion_sensed: now}
     }
 
     pub fn network_activity_started(&mut self) {
@@ -80,6 +84,10 @@ impl AppState {
         buff
     }
 
+    pub fn motion_sensed(&mut self, now: std::time::SystemTime)  {
+        self.last_motion_sensed = now;
+    }
+
     fn update_state(&mut self, json: Top) {
         self.etd_mins = json.root
             .station
@@ -131,7 +139,7 @@ impl AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        Self::new()
+        Self::new(time::SystemTime::now())
     }
 }
 

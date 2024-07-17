@@ -13,7 +13,7 @@ mod spi_driver;
 use spi_driver::Ws2812;
 
 use smart_leds::SmartLedsWrite;
-use std::{sync::mpsc, thread};
+use std::{sync::mpsc, thread, time};
 
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
 type LEDs<'a> = Ws2812<SPI<'a>>;
@@ -78,7 +78,7 @@ impl AppShell<'_>
         timer00: impl Peripheral<P = T0> + 'a, 
         timer01: impl Peripheral<P = T1> + 'a, 
         motion_sensor_pin: Gpio4)-> Result<AppShell<'a>> {
-        let app_state = AppState::new();
+        let app_state = AppState::new(time::SystemTime::now());
         let command_queue = Queue::new(20);
         let fetch_schedule_timer = Self::create_command_timer(timer00, AppShellCommand::FetchSchedule, &command_queue, false)?;
         let render_led_timer = Self::create_command_timer(timer01, AppShellCommand::RenderLEDs, &command_queue, true)?;
@@ -114,7 +114,8 @@ impl AppShell<'_>
             }
             AppShellCommand::MotionSensed => {
                 log::info!("Motion Sensed");
-                self.start_motion_sensor();
+                self.app_state.motion_sensed(time::SystemTime::now());
+                self.start_motion_sensor()?;
             }
         }
         Ok(())
