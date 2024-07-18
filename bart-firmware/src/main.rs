@@ -13,7 +13,7 @@ mod spi_driver;
 use spi_driver::Ws2812;
 
 use smart_leds::SmartLedsWrite;
-use std::{sync::mpsc, thread, time};
+use std::{sync::mpsc, thread, time::{SystemTime, UNIX_EPOCH}};
 
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
 type LEDs<'a> = Ws2812<SPI<'a>>;
@@ -78,7 +78,7 @@ impl AppShell<'_>
         timer00: impl Peripheral<P = T0> + 'a, 
         timer01: impl Peripheral<P = T1> + 'a, 
         motion_sensor_pin: Gpio4)-> Result<AppShell<'a>> {
-        let app_state = AppState::new(time::SystemTime::now());
+        let app_state = AppState::new(duration_since_epoch());
         let command_queue = Queue::new(20);
         let fetch_schedule_timer = Self::create_command_timer(timer00, AppShellCommand::FetchSchedule, &command_queue, false)?;
         let render_led_timer = Self::create_command_timer(timer01, AppShellCommand::RenderLEDs, &command_queue, true)?;
@@ -101,10 +101,12 @@ impl AppShell<'_>
         match command {
             AppShellCommand::FetchSchedule => {
                 log::debug!("Fetching schedule");
+                if !self.app_state.should_perform_fetch(duration_since_epoch()) {
+                    return Ok(());
+                }
                 let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
                 let next_fetch_sec = self.app_state.received_http_response(result);
                 self.schedule_next_fetch(next_fetch_sec)?;
-                self.app_state.network_activity_complete();
             }
             AppShellCommand::RenderLEDs => {
                 self.render_leds()?;
@@ -114,7 +116,7 @@ impl AppShell<'_>
             }
             AppShellCommand::MotionSensed => {
                 log::info!("Motion Sensed");
-                self.app_state.motion_sensed(time::SystemTime::now());
+                self.app_state.motion_sensed(duration_since_epoch());
                 self.start_motion_sensor()?;
             }
         }
@@ -281,6 +283,10 @@ impl LEDOutput {
     }
 }
 
+
+fn duration_since_epoch() -> Duration {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+}
 
 #[toml_cfg::toml_config]
 pub struct Config {

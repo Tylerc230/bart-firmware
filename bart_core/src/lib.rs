@@ -1,10 +1,9 @@
-use std::time;
-use std::time::SystemTime;
-
+#![feature(duration_abs_diff)]
 use serde::Deserialize;
 use anyhow::Result;
 use smart_leds::RGB8;
 use smart_leds::colors;
+pub use core::time::Duration;
 #[cfg(test)]
 #[path = "lib.test.rs"]
 mod tests;
@@ -13,15 +12,16 @@ const FETCH_CORRECTION_TIME_MIN: i32 = 10;
 const FETCH_REFRESH_TIME_MIN: i32 = 5;
 const FETCH_NEXT_TRAIN_TIME_MIN: i32 = 2;
 const FETCH_RETRY_TIME_MIN: i32 = 2;
+const NETWORK_SLEEP_TIME_MIN: u64 = 10;
 
 pub struct AppState {
     etd_mins: Vec<i32>,
     network_activity: bool,
-    last_motion_sensed: SystemTime
+    last_motion_sensed: Duration
 }
 
 impl AppState {
-    pub fn new(now: std::time::SystemTime) -> AppState {
+    pub fn new(now: Duration) -> AppState {
         AppState {etd_mins: Vec::new(), network_activity: false, last_motion_sensed: now}
     }
 
@@ -34,6 +34,7 @@ impl AppState {
     }
 
     pub fn received_http_response(&mut self, response: Result<String>) -> u64 {
+        self.network_activity_complete();
         let minutes = match response {
             Err(error) => {
                 log::error!("Server Response Err {:?}", error);
@@ -84,8 +85,13 @@ impl AppState {
         buff
     }
 
-    pub fn motion_sensed(&mut self, now: std::time::SystemTime)  {
+    pub fn motion_sensed(&mut self, now: Duration)  {
         self.last_motion_sensed = now;
+    }
+
+    pub fn should_perform_fetch(&self, now: Duration) -> bool {
+        let elapsed = self.last_motion_sensed.abs_diff(now);
+        elapsed.as_secs() < NETWORK_SLEEP_TIME_MIN * 60
     }
 
     fn update_state(&mut self, json: Top) {
@@ -135,12 +141,6 @@ impl AppState {
 
     }
 
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self::new(time::SystemTime::now())
-    }
 }
 
 pub struct LEDBuffer {
@@ -203,4 +203,3 @@ struct Etd {
 struct Estimate {
     minutes: String,
 }
-

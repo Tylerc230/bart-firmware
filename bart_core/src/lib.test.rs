@@ -1,7 +1,7 @@
 use crate::AppState;
 use smart_leds::RGB8;
 use smart_leds::colors;
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
+use std::time::Duration;
 mod fixtures;
 static LED_COLOR: RGB8 = colors::WHITE;
 
@@ -106,6 +106,30 @@ fn test_next_fetch_time_3_train() {
     let next_fetch_sec = app_state.received_http_response(fixtures::json_with_etd_3_trains("4", "15"));
     assert_eq!(next_fetch_sec, 600);
 }
+//TODO test network activity state
+
+#[test]
+fn test_should_allow_fetch_on_launch() {
+    let app_state = AppState::new(launch_time());
+    let one_min_duration = Duration::new(60, 0);
+    assert!(app_state.should_perform_fetch(one_min_duration));
+}
+
+#[test]
+fn test_should_not_allow_fetch_after_10_min() {
+    let app_state = AppState::new(launch_time());
+    let ten_min_duration = Duration::new(10 * 60, 0);
+    assert!(!app_state.should_perform_fetch(ten_min_duration));
+}
+
+#[test]
+fn test_should_allow_fetch_after_after_motion_sensed() {
+    let mut app_state = AppState::new(launch_time());
+    let eight_min_duration = Duration::new(8 * 60, 0);
+    app_state.motion_sensed(eight_min_duration);
+    let ten_min_duration = Duration::new(10 * 60, 0);
+    assert!(app_state.should_perform_fetch(ten_min_duration));
+}
 
 fn fill_outer_ring<const N: usize>(buffer: &mut [RGB8; 44], color: RGB8) {
     buffer[..N].clone_from_slice(&[color; N]);
@@ -115,6 +139,6 @@ fn fill_inner_ring<const N: usize>(buffer: &mut [RGB8; 44], color: RGB8) {
     buffer[24..24+N].clone_from_slice(&[color; N]);
 }
 
-fn launch_time() -> SystemTime {
-    UNIX_EPOCH + Duration::new(1_000_000_000, 0)
+fn launch_time() -> Duration {
+    Duration::new(0, 0)
 } 
