@@ -6,19 +6,18 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop, hal::{
         self, cpu::Core, gpio::{self, Gpio4, InterruptType, PinDriver, Pull}, peripheral::Peripheral, prelude::Peripherals, spi::{
             self, SpiDriver, SpiDriverConfig, SPI2
-        }, task::{self, queue::Queue, thread::ThreadSpawnConfiguration}, timer::{config::Config as TimerConfig, TimerDriver}, units::FromValueType
+        }, task::{queue::Queue, thread::ThreadSpawnConfiguration}, timer::{TimerDriver, config::Config as TimerConfig}, units::FromValueType
     }, wifi::EspWifi
 };
 mod spi_driver;
 use spi_driver::Ws2812;
 
 use smart_leds::SmartLedsWrite;
-use std::{sync::mpsc, thread, time::{SystemTime, UNIX_EPOCH}};
+use std::{sync::mpsc, time::{SystemTime, UNIX_EPOCH}};
 
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
 type LEDs<'a> = Ws2812<SPI<'a>>;
 type LEDIter = smart_leds::Brightness<core::array::IntoIter<smart_leds::RGB8, 44>>;
-type WifiConnection = Box<EspWifi<'static>>;
 
 
 static mut WIFI_CONNECTION: Option<Box<EspWifi<'static>>> = None;
@@ -54,7 +53,7 @@ fn main() -> Result<()>{
     Ok(())
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 enum AppShellCommand {
     FetchSchedule,
     RenderLEDs,
@@ -90,7 +89,9 @@ impl AppShell<'_>
     fn start_command_pump(&mut self) {
         loop {
             if let Some((command, _)) = self.command_queue.recv_front(1000) {
-                self.handle_command(command);
+                if let Err(error) = self.handle_command(command) {
+                    log::error!("Error handling {:?} error: {:?}", command, error);
+                }
             } else {
                 log::error!("No command");
             }
@@ -218,7 +219,7 @@ impl AppShell<'_>
                         log::error!("Failed to connect to wifi {:?}", error);
                     }
                 }
-            });
+            })?;
         Ok(())
     }
 
@@ -247,7 +248,9 @@ fn start_render_thread(mut leds: LEDOutput) {
         .spawn(move || {
 
             log::info!("Render loop core: {:?}", esp_idf_svc::hal::cpu::core());
-            leds.render_loop();
+            if let Err(error) = leds.render_loop() {
+                log::error!("Render loop failed {:?}", error);
+            }
         })
         .unwrap();
 }
