@@ -118,6 +118,7 @@ impl AppShell<'_>
             AppShellCommand::MotionSensed => {
                 log::info!("Motion Sensed");
                 self.app_state.motion_sensed(duration_since_epoch());
+                //TODO: need to check if we need to fetch here
                 self.start_motion_sensor()?;
             }
         }

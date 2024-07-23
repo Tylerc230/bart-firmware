@@ -58,6 +58,25 @@ impl AppState {
     }
 
     pub fn get_current_led_buffer(&self, elapse_time_microsec: u64) -> LEDBuffer {
+        let led_buffer = self.led_buffer_for_etd(elapse_time_microsec);
+        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
+        led_buffer
+    }
+
+    pub fn motion_sensed(&mut self, now: Duration)  {
+        self.last_motion_sensed = now;
+    }
+
+    pub fn should_perform_fetch(&self, now: Duration) -> bool {
+        let elapsed = self.last_motion_sensed.abs_diff(now);
+        elapsed.as_secs() < NETWORK_SLEEP_TIME_MIN * 60
+    }
+
+    fn dim_buffer(buffer: &mut LEDBuffer, brightness: u8) {
+
+    }
+
+    fn led_buffer_for_etd(&self, elapse_time_microsec: u64) -> LEDBuffer {
         const MICROSEC_PER_MIN: u64 = 60000000;
         let elapse_time_min = i32::try_from(elapse_time_microsec/MICROSEC_PER_MIN).unwrap();
         let current_etd_min: Vec<i32> = self.etd_mins.iter()
@@ -83,15 +102,6 @@ impl AppState {
             }
         }
         buff
-    }
-
-    pub fn motion_sensed(&mut self, now: Duration)  {
-        self.last_motion_sensed = now;
-    }
-
-    pub fn should_perform_fetch(&self, now: Duration) -> bool {
-        let elapsed = self.last_motion_sensed.abs_diff(now);
-        elapsed.as_secs() < NETWORK_SLEEP_TIME_MIN * 60
     }
 
     fn update_state(&mut self, json: Top) {
