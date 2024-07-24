@@ -127,6 +127,7 @@ impl AppShell<'_>
 
     fn start_render_timer(&mut self) -> Result<()> {
         let fps = 1;
+        //TODO: need to increase this for animations
         self.render_led_timer.set_alarm(self.render_led_timer.tick_hz() * 1/fps)?;
         self.render_led_timer.enable_alarm(true)?;
         Ok(())

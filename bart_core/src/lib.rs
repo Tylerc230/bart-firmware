@@ -58,8 +58,10 @@ impl AppState {
     }
 
     pub fn get_current_led_buffer(&self, elapse_time_microsec: u64) -> LEDBuffer {
-        let led_buffer = self.led_buffer_for_etd(elapse_time_microsec);
-        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
+        let mut led_buffer = LEDBuffer::new();
+        self.add_etd_leds(&mut led_buffer, elapse_time_microsec);
+        Self::dim_buffer(&mut led_buffer, 9);
+        self.add_network_activity_animation(&mut led_buffer);
         led_buffer
     }
 
@@ -73,35 +75,39 @@ impl AppState {
     }
 
     fn dim_buffer(buffer: &mut LEDBuffer, brightness: u8) {
-
+        let dimmed = smart_leds::brightness(buffer.rgb_buffer.into_iter(), brightness); 
+        for (i, rgb) in dimmed.enumerate() {
+            buffer.rgb_buffer[i] = rgb;
+        }
     }
 
-    fn led_buffer_for_etd(&self, elapse_time_microsec: u64) -> LEDBuffer {
+    fn add_network_activity_animation(&self, buffer: &mut LEDBuffer) {
+        if self.network_activity {
+            LEDBuffer::fill_ring(buffer.center_ring(), 4, colors::CORNFLOWER_BLUE);
+        }
+    }
+
+    fn add_etd_leds(&self, led_buffer: &mut LEDBuffer, elapse_time_microsec: u64) {
         const MICROSEC_PER_MIN: u64 = 60000000;
         let elapse_time_min = i32::try_from(elapse_time_microsec/MICROSEC_PER_MIN).unwrap();
         let current_etd_min: Vec<i32> = self.etd_mins.iter()
             .map(|etd| etd - elapse_time_min)//subtract time since fetch
             .filter(|etd| *etd > 0i32)//Filter out trains which have already left
             .collect();
-        let mut buff = LEDBuffer::new();
-        if self.network_activity {
-            LEDBuffer::fill_ring(buff.center_ring(), 4, colors::CORNFLOWER_BLUE);
-        }
         if current_etd_min.is_empty() {
-            return buff;
+            return;
         }
         let next_train =  current_etd_min[0];
         let color = colors::WHITE;
         if next_train > LEDBuffer::INSIDE_RING_SIZE {
-            LEDBuffer::fill_ring(buff.outside_ring(), next_train, color);
+            LEDBuffer::fill_ring(led_buffer.outside_ring(), next_train, color);
         } else {
-            LEDBuffer::fill_ring(buff.inside_ring(), next_train, color);
+            LEDBuffer::fill_ring(led_buffer.inside_ring(), next_train, color);
             if current_etd_min.len() >= 2 {
                 let next_next_train = current_etd_min[1];
-                LEDBuffer::fill_ring(buff.outside_ring(), next_next_train, color);
+                LEDBuffer::fill_ring(led_buffer.outside_ring(), next_next_train, color);
             }
         }
-        buff
     }
 
     fn update_state(&mut self, json: Top) {
