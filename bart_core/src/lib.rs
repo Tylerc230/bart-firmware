@@ -1,12 +1,12 @@
 #![feature(duration_abs_diff)]
 use serde::Deserialize;
 use anyhow::Result;
-use smart_leds::RGB8;
-use smart_leds::colors;
 pub use core::time::Duration;
 #[cfg(test)]
 #[path = "lib.test.rs"]
 mod tests;
+mod led_pipeline;
+use led_pipeline::{Dim, ETDLEDs, LEDBuffer, NetworkAnimation, PipelineStep};
 
 const FETCH_CORRECTION_TIME_MIN: i32 = 10;
 const FETCH_REFRESH_TIME_MIN: i32 = 5;
@@ -16,21 +16,21 @@ const NETWORK_SLEEP_TIME_MIN: u64 = 10;
 
 pub struct AppState {
     etd_mins: Vec<i32>,
-    network_activity: bool,
+    network_animation: Option<NetworkAnimation>,
     last_motion_sensed: Duration
 }
 
 impl AppState {
     pub fn new(now: Duration) -> AppState {
-        AppState {etd_mins: Vec::new(), network_activity: false, last_motion_sensed: now}
+        AppState {etd_mins: Vec::new(), network_animation: None, last_motion_sensed: now}
     }
 
     pub fn network_activity_started(&mut self) {
-        self.network_activity = true;
+        self.network_animation = Some(NetworkAnimation::new());
     }
 
     pub fn network_activity_complete(&mut self) {
-        self.network_activity = false;
+        self.network_animation = None;
     }
 
     pub fn received_http_response(&mut self, response: Result<String>) -> u64 {
@@ -57,12 +57,16 @@ impl AppState {
         minutes as u64 * 60
     }
 
-    pub fn get_current_led_buffer(&self, elapse_time_microsec: u64) -> LEDBuffer {
-        let mut led_buffer = LEDBuffer::new();
-        self.add_etd_leds(&mut led_buffer, elapse_time_microsec);
-        Self::dim_buffer(&mut led_buffer, 9);
-        self.add_network_activity_animation(&mut led_buffer);
-        led_buffer
+    pub fn get_current_led_buffer(&mut self, elapse_time_microsec: u64) -> LEDBuffer {
+        let mut etd_led = ETDLEDs::new();
+        etd_led.update(&self.etd_mins, elapse_time_microsec);
+        let mut pipeline = vec![&mut etd_led as &mut dyn PipelineStep];
+        if let Some(animation) = self.network_animation.as_mut() {
+            pipeline.push(animation);
+        }
+        let mut dim = Dim::new(127);
+        pipeline.push(&mut dim);
+        LEDBuffer::process_pipeline(pipeline)
     }
 
     pub fn motion_sensed(&mut self, now: Duration)  {
@@ -72,42 +76,6 @@ impl AppState {
     pub fn should_perform_fetch(&self, now: Duration) -> bool {
         let elapsed = self.last_motion_sensed.abs_diff(now);
         elapsed.as_secs() < NETWORK_SLEEP_TIME_MIN * 60
-    }
-
-    fn dim_buffer(buffer: &mut LEDBuffer, brightness: u8) {
-        let dimmed = smart_leds::brightness(buffer.rgb_buffer.into_iter(), brightness); 
-        for (i, rgb) in dimmed.enumerate() {
-            buffer.rgb_buffer[i] = rgb;
-        }
-    }
-
-    fn add_network_activity_animation(&self, buffer: &mut LEDBuffer) {
-        if self.network_activity {
-            LEDBuffer::fill_ring(buffer.center_ring(), 4, colors::CORNFLOWER_BLUE);
-        }
-    }
-
-    fn add_etd_leds(&self, led_buffer: &mut LEDBuffer, elapse_time_microsec: u64) {
-        const MICROSEC_PER_MIN: u64 = 60000000;
-        let elapse_time_min = i32::try_from(elapse_time_microsec/MICROSEC_PER_MIN).unwrap();
-        let current_etd_min: Vec<i32> = self.etd_mins.iter()
-            .map(|etd| etd - elapse_time_min)//subtract time since fetch
-            .filter(|etd| *etd > 0i32)//Filter out trains which have already left
-            .collect();
-        if current_etd_min.is_empty() {
-            return;
-        }
-        let next_train =  current_etd_min[0];
-        let color = colors::WHITE;
-        if next_train > LEDBuffer::INSIDE_RING_SIZE {
-            LEDBuffer::fill_ring(led_buffer.outside_ring(), next_train, color);
-        } else {
-            LEDBuffer::fill_ring(led_buffer.inside_ring(), next_train, color);
-            if current_etd_min.len() >= 2 {
-                let next_next_train = current_etd_min[1];
-                LEDBuffer::fill_ring(led_buffer.outside_ring(), next_next_train, color);
-            }
-        }
     }
 
     fn update_state(&mut self, json: Top) {
@@ -158,40 +126,6 @@ impl AppState {
     }
 
 }
-
-pub struct LEDBuffer {
-    pub rgb_buffer: [RGB8; Self::BUFFER_SIZE as usize],
-}
-
-impl LEDBuffer {
-    const OUTSIDE_RING_SIZE: i32 = 24;
-    const INSIDE_RING_SIZE: i32 = 16;
-    const CENTER_RING_SIZE: i32 = 4;
-    const BUFFER_SIZE: i32 =  LEDBuffer::OUTSIDE_RING_SIZE + LEDBuffer::INSIDE_RING_SIZE + LEDBuffer::CENTER_RING_SIZE;
-    fn new() -> LEDBuffer {
-        LEDBuffer{rgb_buffer: [RGB8::default(); Self::BUFFER_SIZE as usize]}
-    }
-
-    fn outside_ring(&mut self) -> &mut [RGB8] {
-        &mut self.rgb_buffer[..Self::OUTSIDE_RING_SIZE as usize]
-    }
-
-    fn inside_ring(&mut self) -> &mut [RGB8] {
-        &mut self.rgb_buffer[Self::OUTSIDE_RING_SIZE as usize ..(Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE) as usize]
-    }
-
-    fn center_ring(&mut self) -> &mut [RGB8] {
-        &mut self.rgb_buffer[(Self::OUTSIDE_RING_SIZE + Self::INSIDE_RING_SIZE) as usize..]
-    }
-
-    fn fill_ring(ring: &mut [RGB8], count: i32, value: RGB8) {
-        let count = count as usize;
-        for led in ring.iter_mut().take(count) {
-            *led = value;
-        }
-    }
-}
-
 
 #[derive(Deserialize, Debug)]
 struct Top {
