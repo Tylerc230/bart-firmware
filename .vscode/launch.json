@@ -21,6 +21,27 @@
         "args": [ "test_etd_is_LEAVING" ],
         "stopOnEntry": false,
         "sourceLanguages": ["rust"],
+      },
+      {
+        // more info at: https://github.com/Marus/cortex-debug/blob/master/package.json
+        "name": "Attach",
+        "type": "cortex-debug",
+        "request": "attach", // launch will fail when attempting to download the app into the target
+        "cwd": "${workspaceRoot}",
+        "executable": "target/xtensa-esp32s3-espidf/debug/bart-firmware", //!MODIFY
+        "servertype": "openocd",
+        "interface": "jtag",
+        "toolchainPrefix": "xtensa-esp32-elf", //!MODIFY
+        "openOCDPreConfigLaunchCommands": ["set ESP_RTOS none"],
+        "serverpath": "/Users/tyler/.espressif/tools/openocd-esp32/v0.12.0-esp32-20240318/openocd-esp32/bin/openocd", //!MODIFY
+        "gdbPath": "/Users/tyler/tools/xtensa-esp-elf-gdb/bin/xtensa-esp32s3-elf-gdb", //!MODIFY
+        "configFiles": ["board/esp32s3-builtin.cfg"], //!MODIFY
+        "overrideAttachCommands": [
+          "set remote hardware-watchpoint-limit 2",
+          "mon halt",
+          "flushregs"
+        ],
+        "overrideRestartCommands": ["mon reset halt", "flushregs", "c"]
       }
     ]
   }
