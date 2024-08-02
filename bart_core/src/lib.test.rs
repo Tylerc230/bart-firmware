@@ -3,7 +3,7 @@ use smart_leds::RGB8;
 use smart_leds::colors;
 use std::time::Duration;
 mod fixtures;
-static LED_COLOR: RGB8 = RGB8 {r: 127, g: 127, b: 127};
+static LED_COLOR: RGB8 = RGB8 {r: 16, g: 16, b: 16};
 
 
 

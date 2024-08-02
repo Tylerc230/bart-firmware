@@ -9,6 +9,7 @@ use esp_idf_svc::{
         }, task::{queue::Queue, thread::ThreadSpawnConfiguration}, timer::{TimerDriver, config::Config as TimerConfig}, units::FromValueType
     }, wifi::EspWifi
 };
+use smart_leds::RGB8;
 mod spi_driver;
 use spi_driver::Ws2812;
 
@@ -17,7 +18,7 @@ use std::{sync::mpsc, time::{SystemTime, UNIX_EPOCH}};
 
 type SPI<'a> = spi::SpiBusDriver<'a, SpiDriver<'a>>;
 type LEDs<'a> = Ws2812<SPI<'a>>;
-type LEDIter = smart_leds::Brightness<core::array::IntoIter<smart_leds::RGB8, 44>>;
+type LEDIter = [RGB8; 44];
 
 
 static mut WIFI_CONNECTION: Option<Box<EspWifi<'static>>> = None;
@@ -105,6 +106,9 @@ impl AppShell<'_>
                 if !self.app_state.should_perform_fetch(duration_since_epoch()) {
                     return Ok(());
                 }
+
+                let fetch_start_time_microsec = self.fetch_schedule_timer.counter()?;
+                self.app_state.network_activity_started(fetch_start_time_microsec);  
                 let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
                 let next_fetch_sec = self.app_state.received_http_response(result);
                 self.schedule_next_fetch(next_fetch_sec)?;
@@ -116,7 +120,7 @@ impl AppShell<'_>
                 self.schedule_next_fetch(0)?;
             }
             AppShellCommand::MotionSensed => {
-                log::info!("Motion Sensed");
+                //log::info!("Motion Sensed");
                 self.app_state.motion_sensed(duration_since_epoch());
                 //TODO: need to check if we need to fetch here
                 self.start_motion_sensor()?;
@@ -126,8 +130,7 @@ impl AppShell<'_>
     }
 
     fn start_render_timer(&mut self) -> Result<()> {
-        let fps = 1;
-        //TODO: need to increase this for animations
+        let fps = 30;
         self.render_led_timer.set_alarm(self.render_led_timer.tick_hz() * 1/fps)?;
         self.render_led_timer.enable_alarm(true)?;
         Ok(())
@@ -136,8 +139,7 @@ impl AppShell<'_>
     fn render_leds(&mut self) -> Result<()>{
         let request_fetch_time_microsec = self.fetch_schedule_timer.counter()?;
         let led_buffer = self.app_state.get_current_led_buffer(request_fetch_time_microsec);
-        let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), 9); 
-        self.led_tx.send(dimmed)?;
+        self.led_tx.send(led_buffer.rgb_buffer);
         Ok(())
     }
 
@@ -186,7 +188,8 @@ impl AppShell<'_>
     }
 
     fn connect_to_wifi(&mut self, modem: impl hal::peripheral::Peripheral<P = hal::modem::Modem> + 'static + std::marker::Send) -> Result<()> {
-        self.app_state.network_activity_started();
+        let connection_start_time = self.fetch_schedule_timer.counter()?;
+        self.app_state.network_activity_started(connection_start_time);
         let config = ThreadSpawnConfiguration {
             name: Some(b"WifiConnectThread\0"),
             stack_size: 4096,

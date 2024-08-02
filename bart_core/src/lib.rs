@@ -25,8 +25,8 @@ impl AppState {
         AppState {etd_mins: Vec::new(), network_animation: None, last_motion_sensed: now}
     }
 
-    pub fn network_activity_started(&mut self) {
-        self.network_animation = Some(NetworkAnimation::new());
+    pub fn network_activity_started(&mut self, elapse_time_microsec: u64) {
+        self.network_animation = Some(NetworkAnimation::new(elapse_time_microsec));
     }
 
     pub fn network_activity_complete(&mut self) {
@@ -64,9 +64,9 @@ impl AppState {
         if let Some(animation) = self.network_animation.as_mut() {
             pipeline.push(animation);
         }
-        let mut dim = Dim::new(127);
+        let mut dim = Dim::new(16);
         pipeline.push(&mut dim);
-        LEDBuffer::process_pipeline(pipeline)
+        LEDBuffer::process_pipeline(pipeline, elapse_time_microsec)
     }
 
     pub fn motion_sensed(&mut self, now: Duration)  {

@@ -1,7 +1,7 @@
 use smart_leds::RGB8;
 use smart_leds::colors;
 pub trait PipelineStep {
-    fn render(&self, led_buffer: &mut LEDBuffer);
+    fn render(&self, led_buffer: &mut LEDBuffer, elapse_time_microsec: u64);
 }
 
 pub struct LEDBuffer {
@@ -17,10 +17,10 @@ impl LEDBuffer {
         LEDBuffer{rgb_buffer: [RGB8::default(); Self::BUFFER_SIZE as usize]}
     }
 
-    pub fn process_pipeline(pipeline: Vec<&mut dyn PipelineStep>) -> LEDBuffer {
+    pub fn process_pipeline(pipeline: Vec<&mut dyn PipelineStep>, elapse_time_microsec: u64) -> LEDBuffer {
         let mut led_buffer = LEDBuffer::new();
         for step in pipeline {
-            step.render(&mut led_buffer);
+            step.render(&mut led_buffer, elapse_time_microsec);
         }
         led_buffer
 
@@ -80,7 +80,7 @@ impl ETDLEDs {
 }
 
 impl PipelineStep for ETDLEDs {
-    fn render(&self, led_buffer: &mut LEDBuffer) {
+    fn render(&self, led_buffer: &mut LEDBuffer, elapse_time_microsec: u64) {
         let color = colors::WHITE;
         LEDBuffer::fill_ring(led_buffer.inside_ring(), self.inside_ring_count, color);
         LEDBuffer::fill_ring(led_buffer.outside_ring(), self.outside_ring_count, color);
@@ -88,18 +88,23 @@ impl PipelineStep for ETDLEDs {
 }
 
 pub struct NetworkAnimation {
+    start_time_microsec: u64
 }
 
 impl NetworkAnimation {
-    pub fn new() -> Self {
-        Self { }
+    pub fn new(start_time_microsec: u64) -> Self {
+        Self { start_time_microsec }
     }
 }
 
 impl PipelineStep for NetworkAnimation {
 
-    fn render(&self, led_buffer: &mut LEDBuffer) {
-        LEDBuffer::fill_ring(led_buffer.center_ring(), 4, colors::CORNFLOWER_BLUE);
+    fn render(&self, led_buffer: &mut LEDBuffer, elapse_time_microsec: u64) {
+        const MICROSEC_PER_SEC: u64 = 1000000;
+        let elapse = elapse_time_microsec - self.start_time_microsec;
+        let elapse_per_sec = elapse % MICROSEC_PER_SEC;
+        let brightness = elapse_per_sec * 255 / MICROSEC_PER_SEC;
+        LEDBuffer::fill_ring(led_buffer.center_ring(), 4, colors::WHITE.dim(brightness as u8));
     }
 }
 
@@ -114,7 +119,7 @@ impl Dim {
 }
 
 impl PipelineStep for Dim {
-    fn render(&self, led_buffer: &mut LEDBuffer) {
+    fn render(&self, led_buffer: &mut LEDBuffer, elapse_time_microsec: u64) {
         let dimmed = smart_leds::brightness(led_buffer.rgb_buffer.into_iter(), self.scale_value); 
         for (i, rgb) in dimmed.enumerate() {
             led_buffer.rgb_buffer[i] = rgb;
@@ -122,4 +127,16 @@ impl PipelineStep for Dim {
     }
 }
 
+trait Dimmable {
+    fn dim(&self, amount: u8) -> RGB8;
+}
 
+impl Dimmable for RGB8 {
+    fn dim(&self, amount: u8) -> RGB8 {
+         RGB8 {
+            r: (self.r as u16 * (amount as u16 + 1) / 256) as u8,
+            g: (self.g as u16 * (amount as u16 + 1) / 256) as u8,
+            b: (self.b as u16 * (amount as u16 + 1) / 256) as u8,
+        }
+    }
+}
