@@ -16,13 +16,14 @@ const NETWORK_SLEEP_TIME_MIN: u64 = 10;
 
 pub struct AppState {
     etd_mins: Vec<i32>,
+    last_fetch_time: u64,
     network_animation: Option<NetworkAnimation>,
     last_motion_sensed: Duration
 }
 
 impl AppState {
     pub fn new(now: Duration) -> AppState {
-        AppState {etd_mins: Vec::new(), network_animation: None, last_motion_sensed: now}
+        AppState {etd_mins: Vec::new(), last_fetch_time: 0, network_animation: None, last_motion_sensed: now}
     }
 
     pub fn network_activity_started(&mut self, elapse_time_microsec: u64) {
@@ -33,7 +34,8 @@ impl AppState {
         self.network_animation = None;
     }
 
-    pub fn received_http_response(&mut self, response: Result<String>) -> u64 {
+    pub fn received_http_response(&mut self, response: Result<String>, current_time_microsec: u64) -> u64 {
+        self.last_fetch_time = current_time_microsec;
         self.network_activity_complete();
         let minutes = match response {
             Err(error) => {
@@ -56,17 +58,17 @@ impl AppState {
         };
         minutes as u64 * 60
     }
-
-    pub fn get_current_led_buffer(&mut self, elapse_time_microsec: u64) -> LEDBuffer {
+    pub fn get_current_led_buffer(&mut self, current_time_microsec: u64) -> LEDBuffer {
         let mut etd_led = ETDLEDs::new();
-        etd_led.update(&self.etd_mins, elapse_time_microsec);
+        let elapsed_since_fetch_microsec = current_time_microsec - self.last_fetch_time;
+        etd_led.update(&self.etd_mins, elapsed_since_fetch_microsec);
         let mut pipeline = vec![&mut etd_led as &mut dyn PipelineStep];
         if let Some(animation) = self.network_animation.as_mut() {
             pipeline.push(animation);
         }
         let mut dim = Dim::new(16);
         pipeline.push(&mut dim);
-        LEDBuffer::process_pipeline(pipeline, elapse_time_microsec)
+        LEDBuffer::process_pipeline(pipeline, current_time_microsec)
     }
 
     pub fn motion_sensed(&mut self, now: Duration)  {

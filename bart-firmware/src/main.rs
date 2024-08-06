@@ -79,7 +79,7 @@ impl AppShell<'_>
         timer01: impl Peripheral<P = T1> + 'a, 
         motion_sensor_pin: Gpio4)-> Result<AppShell<'a>> {
         let app_state = AppState::new(duration_since_epoch());
-        let command_queue = Queue::new(20);
+        let command_queue = Queue::new(200);
         let fetch_schedule_timer = Self::create_command_timer(timer00, AppShellCommand::FetchSchedule, &command_queue, false)?;
         let render_led_timer = Self::create_command_timer(timer01, AppShellCommand::RenderLEDs, &command_queue, true)?;
         let motion_sensor = Self::create_motion_sensor(motion_sensor_pin, &command_queue)?;
@@ -110,7 +110,7 @@ impl AppShell<'_>
                 let fetch_start_time_microsec = self.fetch_schedule_timer.counter()?;
                 self.app_state.network_activity_started(fetch_start_time_microsec);  
                 let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-                let next_fetch_sec = self.app_state.received_http_response(result);
+                let next_fetch_sec = self.app_state.received_http_response(result, self.fetch_schedule_timer.counter()?);
                 self.schedule_next_fetch(next_fetch_sec)?;
             }
             AppShellCommand::RenderLEDs => {
@@ -147,7 +147,6 @@ impl AppShell<'_>
         log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
         self.fetch_schedule_timer.set_alarm(self.fetch_schedule_timer.tick_hz() * fetch_after_sec)?;
         self.fetch_schedule_timer.enable_alarm(true)?;
-        self.fetch_schedule_timer.set_counter(0)?;
         Ok(())
     }
 
@@ -163,7 +162,15 @@ impl AppShell<'_>
         unsafe {
             let c = Self::new_queue(command_queue);
             timer_driver.subscribe(move || {
-                c.send_back(command, 100).unwrap();
+                let _result = c.send_back(command, 100);
+                //match result {
+                    //Ok(value) => {
+                        //log::debug!("Sent command {:?}, v: {:?}", command, value);
+                    //},
+                    //Err(error) => {
+                        //log::error!("Failed to send command {:?} error: {:?}", command, error);
+                    //}
+                //}
             })?;
         }
         timer_driver.set_counter(0_u64)?;
