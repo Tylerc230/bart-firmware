@@ -22,6 +22,7 @@ type LEDIter = [RGB8; 44];
 
 
 static mut WIFI_CONNECTION: Option<Box<EspWifi<'static>>> = None;
+static mut ERROR_STRING: Option<String> = None;
 fn main() -> Result<()>{
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -59,7 +60,8 @@ enum AppShellCommand {
     FetchSchedule,
     RenderLEDs,
     MotionSensed,
-    WifiConnected
+    WifiConnected,
+    Error
 }
 struct AppShell<'a> {
     app_state: AppState,
@@ -102,11 +104,12 @@ impl AppShell<'_>
     fn handle_command(&mut self, command: AppShellCommand) -> Result<()> {
         match command {
             AppShellCommand::FetchSchedule => {
-                log::debug!("Fetching schedule");
                 if !self.app_state.should_perform_fetch(duration_since_epoch()) {
+                    log::info!("Skipping fetch");
                     return Ok(());
                 }
 
+                log::debug!("Fetching schedule");
                 let fetch_start_time_microsec = self.fetch_schedule_timer.counter()?;
                 self.app_state.network_activity_started(fetch_start_time_microsec);  
                 let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
@@ -124,6 +127,11 @@ impl AppShell<'_>
                 self.app_state.motion_sensed(duration_since_epoch());
                 //TODO: need to check if we need to fetch here
                 self.start_motion_sensor()?;
+            }
+            AppShellCommand::Error => {
+                unsafe {
+                    log::error!("Error: {:?}", ERROR_STRING);
+                }
             }
         }
         Ok(())
@@ -145,7 +153,7 @@ impl AppShell<'_>
 
     fn schedule_next_fetch(&mut self, fetch_after_sec: u64) -> Result<()> {
         log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
-        self.fetch_schedule_timer.set_alarm(self.fetch_schedule_timer.tick_hz() * fetch_after_sec)?;
+        self.fetch_schedule_timer.set_alarm(self.fetch_schedule_timer.counter()? + self.fetch_schedule_timer.tick_hz() * fetch_after_sec)?;
         self.fetch_schedule_timer.enable_alarm(true)?;
         Ok(())
     }
@@ -162,15 +170,15 @@ impl AppShell<'_>
         unsafe {
             let c = Self::new_queue(command_queue);
             timer_driver.subscribe(move || {
-                let _result = c.send_back(command, 100);
-                //match result {
-                    //Ok(value) => {
-                        //log::debug!("Sent command {:?}, v: {:?}", command, value);
-                    //},
-                    //Err(error) => {
-                        //log::error!("Failed to send command {:?} error: {:?}", command, error);
-                    //}
-                //}
+                let result = c.send_back(command, 100);
+                match result {
+                    Ok(_value) => {
+                    },
+                    Err(error) => {
+                        ERROR_STRING = Some(format!("Error sending command {:?}", error));
+                        c.send_front(AppShellCommand::Error, 100).unwrap();
+                    }
+                }
             })?;
         }
         timer_driver.set_counter(0_u64)?;
@@ -187,7 +195,6 @@ impl AppShell<'_>
             let c = Self::new_queue(command_queue);
             motion_sensor.subscribe(move || {
                 c.send_front(AppShellCommand::MotionSensed, 100).unwrap();
-                //log::info!("MOTION SENSED");
             })?;
         }
         Ok(motion_sensor)
