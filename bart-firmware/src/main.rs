@@ -104,17 +104,7 @@ impl AppShell<'_>
     fn handle_command(&mut self, command: AppShellCommand) -> Result<()> {
         match command {
             AppShellCommand::FetchSchedule => {
-                if !self.app_state.should_perform_fetch(duration_since_epoch()) {
-                    log::info!("Skipping fetch");
-                    return Ok(());
-                }
-
-                log::debug!("Fetching schedule");
-                let fetch_start_time_microsec = self.fetch_schedule_timer.counter()?;
-                self.app_state.network_activity_started(fetch_start_time_microsec);  
-                let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
-                let next_fetch_sec = self.app_state.received_http_response(result, self.fetch_schedule_timer.counter()?);
-                self.schedule_next_fetch(next_fetch_sec)?;
+                self.fetch_schedule_if_needed()?;
             }
             AppShellCommand::RenderLEDs => {
                 self.render_leds()?;
@@ -123,10 +113,11 @@ impl AppShell<'_>
                 self.schedule_next_fetch(0)?;
             }
             AppShellCommand::MotionSensed => {
-                //log::info!("Motion Sensed");
-                self.app_state.motion_sensed(duration_since_epoch());
-                //TODO: need to check if we need to fetch here
+                let was_sleeping = self.app_state.motion_sensed(duration_since_epoch());
                 self.start_motion_sensor()?;
+                if was_sleeping {
+                    self.fetch_schedule_if_needed()?;
+                }
             }
             AppShellCommand::Error => {
                 unsafe {
@@ -153,8 +144,24 @@ impl AppShell<'_>
 
     fn schedule_next_fetch(&mut self, fetch_after_sec: u64) -> Result<()> {
         log::info!("Scheduling fetch in {} seconds", fetch_after_sec);
-        self.fetch_schedule_timer.set_alarm(self.fetch_schedule_timer.counter()? + self.fetch_schedule_timer.tick_hz() * fetch_after_sec)?;
+        let fetch_time_hz = self.fetch_schedule_timer.counter()? + self.fetch_schedule_timer.tick_hz() * fetch_after_sec;
+        self.fetch_schedule_timer.set_alarm(fetch_time_hz)?;
         self.fetch_schedule_timer.enable_alarm(true)?;
+        Ok(())
+    }
+
+    fn fetch_schedule_if_needed(&mut self) -> Result<()> {
+        if !self.app_state.should_perform_fetch(duration_since_epoch()) {
+            log::info!("Skipping fetch");
+            return Ok(());
+        }
+
+        log::info!("Fetching schedule");
+        let fetch_start_time_microsec = self.fetch_schedule_timer.counter()?;
+        self.app_state.network_activity_started(fetch_start_time_microsec);  
+        let result = http::get("https://api.bart.gov/api/etd.aspx?cmd=etd&orig=ROCK&key=MW9S-E7SL-26DU-VV8V&json=y");
+        let next_fetch_sec = self.app_state.received_http_response(result, self.fetch_schedule_timer.counter()?);
+        self.schedule_next_fetch(next_fetch_sec)?;
         Ok(())
     }
 
@@ -194,7 +201,7 @@ impl AppShell<'_>
         unsafe {
             let c = Self::new_queue(command_queue);
             motion_sensor.subscribe(move || {
-                c.send_front(AppShellCommand::MotionSensed, 100).unwrap();
+                c.send_back(AppShellCommand::MotionSensed, 100).unwrap();
             })?;
         }
         Ok(motion_sensor)

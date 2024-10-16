@@ -71,8 +71,10 @@ impl AppState {
         LEDBuffer::process_pipeline(pipeline, current_time_microsec)
     }
 
-    pub fn motion_sensed(&mut self, now: Duration)  {
+    pub fn motion_sensed(&mut self, now: Duration) -> bool {
+        let was_sleeping = !self.should_perform_fetch(now);
         self.last_motion_sensed = now;
+        was_sleeping
     }
 
     pub fn should_perform_fetch(&self, now: Duration) -> bool {
